@@ -1393,9 +1393,9 @@ where
 			Some(&root),
 		)
 		.map_err(|e| sp_blockchain::Error::from_state(Box::new(e)))?;
-		let proving_backend = sp_state_machine::TrieBackendBuilder::new(db, root).build();
+		let mut proving_backend = sp_state_machine::TrieBackendBuilder::new(db, root).build();
 		let state = read_range_proof_check_with_child_on_proving_backend::<HashingFor<Block>>(
-			&proving_backend,
+			&mut proving_backend,
 			start_key,
 		)?;
 

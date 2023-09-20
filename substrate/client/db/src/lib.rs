@@ -169,15 +169,15 @@ impl<B: BlockT> StorageIterator<HashingFor<B>> for RawIter<B> {
 	type Backend = RefTrackingState<B>;
 	type Error = <DbState<B> as StateBackend<HashingFor<B>>>::Error;
 
-	fn next_key(&mut self, backend: &Self::Backend) -> Option<Result<StorageKey, Self::Error>> {
-		self.inner.next_key(&backend.state)
+	fn next_key(&mut self, backend: &mut Self::Backend) -> Option<Result<StorageKey, Self::Error>> {
+		self.inner.next_key(&mut backend.state)
 	}
 
 	fn next_pair(
 		&mut self,
 		backend: &Self::Backend,
 	) -> Option<Result<(StorageKey, StorageValue), Self::Error>> {
-		self.inner.next_pair(&backend.state)
+		self.inner.next_pair(&mut backend.state)
 	}
 
 	fn was_complete(&self) -> bool {
@@ -287,9 +287,9 @@ impl<B: BlockT> AsTrieBackend<HashingFor<B>> for RefTrackingState<B> {
 	type TrieBackendStorage = <DbState<B> as StateBackend<HashingFor<B>>>::TrieBackendStorage;
 
 	fn as_trie_backend(
-		&self,
-	) -> &sp_state_machine::TrieBackend<Self::TrieBackendStorage, HashingFor<B>> {
-		&self.state.as_trie_backend()
+		&mut self,
+	) -> &mut sp_state_machine::TrieBackend<Self::TrieBackendStorage, HashingFor<B>> {
+		&mut self.state.as_trie_backend()
 	}
 }
 
@@ -2740,7 +2740,7 @@ pub(crate) mod tests {
 
 			db.commit_operation(op).unwrap();
 
-			let state = db.state_at(hash).unwrap();
+			let mut state = db.state_at(hash).unwrap();
 
 			assert_eq!(state.storage(&[1, 3, 5]).unwrap(), Some(vec![2, 4, 6]));
 			assert_eq!(state.storage(&[1, 2, 3]).unwrap(), Some(vec![9, 9, 9]));
@@ -2775,7 +2775,7 @@ pub(crate) mod tests {
 
 			db.commit_operation(op).unwrap();
 
-			let state = db.state_at(header.hash()).unwrap();
+			let mut state = db.state_at(header.hash()).unwrap();
 
 			assert_eq!(state.storage(&[1, 3, 5]).unwrap(), None);
 			assert_eq!(state.storage(&[1, 2, 3]).unwrap(), Some(vec![9, 9, 9]));

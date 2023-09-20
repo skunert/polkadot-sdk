@@ -99,7 +99,7 @@ where
 	/// The overlayed changes to write to.
 	overlay: &'a mut OverlayedChanges<H>,
 	/// The storage backend to read from.
-	backend: &'a B,
+	backend: &'a mut B,
 	/// Pseudo-unique id used for tracing.
 	pub id: u16,
 	/// Extensions registered with this instance.
@@ -114,7 +114,7 @@ where
 {
 	/// Create a new `Ext`.
 	#[cfg(not(feature = "std"))]
-	pub fn new(overlay: &'a mut OverlayedChanges<H>, backend: &'a B) -> Self {
+	pub fn new(overlay: &'a mut OverlayedChanges<H>, backend: &'a mut B) -> Self {
 		Ext { overlay, backend, id: 0 }
 	}
 
@@ -122,7 +122,7 @@ where
 	#[cfg(feature = "std")]
 	pub fn new(
 		overlay: &'a mut OverlayedChanges<H>,
-		backend: &'a B,
+		backend: &'a mut B,
 		extensions: Option<&'a mut sp_externalities::Extensions>,
 	) -> Self {
 		Self {
@@ -502,7 +502,7 @@ where
 
 		let _guard = guard();
 
-		let backend = &mut self.backend;
+		let mut backend = &self.backend;
 		let current_value = self.overlay.value_mut_or_insert_with(&key, || {
 			backend.storage(&key).expect(EXT_NOT_ALLOWED_TO_FAIL).unwrap_or_default()
 		});
@@ -838,7 +838,7 @@ mod tests {
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_storage(vec![20], None);
 		overlay.set_storage(vec![30], Some(vec![31]));
-		let backend = (
+		let mut backend = (
 			Storage {
 				top: map![
 					vec![10] => vec![10],
@@ -851,7 +851,7 @@ mod tests {
 		)
 			.into();
 
-		let ext = TestExt::new(&mut overlay, &backend, None);
+		let ext = TestExt::new(&mut overlay, &mut backend, None);
 
 		// next_backend < next_overlay
 		assert_eq!(ext.next_storage_key(&[5]), Some(vec![10]));
@@ -867,7 +867,7 @@ mod tests {
 
 		drop(ext);
 		overlay.set_storage(vec![50], Some(vec![50]));
-		let ext = TestExt::new(&mut overlay, &backend, None);
+		let ext = TestExt::new(&mut overlay, &mut backend, None);
 
 		// next_overlay exist but next_backend doesn't exist
 		assert_eq!(ext.next_storage_key(&[40]), Some(vec![50]));
@@ -886,7 +886,7 @@ mod tests {
 		overlay.set_storage(vec![27], None);
 		overlay.set_storage(vec![28], None);
 		overlay.set_storage(vec![29], None);
-		let backend = (
+		let mut backend = (
 			Storage {
 				top: map![
 					vec![30] => vec![30]
@@ -897,7 +897,7 @@ mod tests {
 		)
 			.into();
 
-		let ext = TestExt::new(&mut overlay, &backend, None);
+		let ext = TestExt::new(&mut overlay, &mut backend, None);
 
 		assert_eq!(ext.next_storage_key(&[5]), Some(vec![30]));
 
@@ -912,7 +912,7 @@ mod tests {
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_child_storage(child_info, vec![20], None);
 		overlay.set_child_storage(child_info, vec![30], Some(vec![31]));
-		let backend = (
+		let mut backend = (
 			Storage {
 				top: map![],
 				children_default: map![
@@ -930,7 +930,7 @@ mod tests {
 		)
 			.into();
 
-		let ext = TestExt::new(&mut overlay, &backend, None);
+		let ext = TestExt::new(&mut overlay, &mut backend, None);
 
 		// next_backend < next_overlay
 		assert_eq!(ext.next_child_storage_key(child_info, &[5]), Some(vec![10]));
@@ -946,7 +946,7 @@ mod tests {
 
 		drop(ext);
 		overlay.set_child_storage(child_info, vec![50], Some(vec![50]));
-		let ext = TestExt::new(&mut overlay, &backend, None);
+		let ext = TestExt::new(&mut overlay, &mut backend, None);
 
 		// next_overlay exist but next_backend doesn't exist
 		assert_eq!(ext.next_child_storage_key(child_info, &[40]), Some(vec![50]));
@@ -959,7 +959,7 @@ mod tests {
 		let mut overlay = OverlayedChanges::default();
 		overlay.set_child_storage(child_info, vec![20], None);
 		overlay.set_child_storage(child_info, vec![30], Some(vec![31]));
-		let backend = (
+		let mut backend = (
 			Storage {
 				top: map![],
 				children_default: map![
@@ -977,7 +977,7 @@ mod tests {
 		)
 			.into();
 
-		let ext = TestExt::new(&mut overlay, &backend, None);
+		let ext = TestExt::new(&mut overlay, &mut backend, None);
 
 		assert_eq!(ext.child_storage(child_info, &[10]), Some(vec![10]));
 		assert_eq!(
@@ -1000,7 +1000,7 @@ mod tests {
 		let child_info = ChildInfo::new_default(b"Child1");
 		let child_info = &child_info;
 		let mut overlay = OverlayedChanges::default();
-		let backend = (
+		let mut backend = (
 			Storage {
 				top: map![],
 				children_default: map![
@@ -1016,7 +1016,7 @@ mod tests {
 		)
 			.into();
 
-		let ext = TestExt::new(&mut overlay, &backend, None);
+		let ext = TestExt::new(&mut overlay, &mut backend, None);
 
 		use sp_core::storage::well_known_keys;
 		let mut ext = ext;

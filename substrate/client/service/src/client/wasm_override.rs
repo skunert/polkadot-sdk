@@ -87,7 +87,7 @@ fn make_hash<K: std::hash::Hash + ?Sized>(val: &K) -> Vec<u8> {
 }
 
 impl FetchRuntimeCode for WasmBlob {
-	fn fetch_runtime_code(&self) -> Option<std::borrow::Cow<[u8]>> {
+	fn fetch_runtime_code(&mut self) -> Option<std::borrow::Cow<[u8]>> {
 		Some(self.code.as_slice().into())
 	}
 }

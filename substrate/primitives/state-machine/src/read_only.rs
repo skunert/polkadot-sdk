@@ -58,7 +58,7 @@ where
 /// to the storage.
 #[derive(Debug)]
 pub struct ReadOnlyExternalities<'a, H: Hasher, B: 'a + Backend<H>> {
-	backend: &'a B,
+	backend: &'a mut B,
 	_phantom: PhantomData<H>,
 }
 

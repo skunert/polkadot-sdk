@@ -61,14 +61,14 @@ pub trait FetchRuntimeCode {
 	/// Fetch the runtime `:code`.
 	///
 	/// If the `:code` could not be found/not available, `None` should be returned.
-	fn fetch_runtime_code(&self) -> Option<Cow<[u8]>>;
+	fn fetch_runtime_code(&mut self) -> Option<Cow<[u8]>>;
 }
 
 /// Wrapper to use a `u8` slice or `Vec` as [`FetchRuntimeCode`].
 pub struct WrappedRuntimeCode<'a>(pub std::borrow::Cow<'a, [u8]>);
 
 impl<'a> FetchRuntimeCode for WrappedRuntimeCode<'a> {
-	fn fetch_runtime_code(&self) -> Option<Cow<[u8]>> {
+	fn fetch_runtime_code(&mut self) -> Option<Cow<[u8]>> {
 		Some(self.0.as_ref().into())
 	}
 }
@@ -77,16 +77,15 @@ impl<'a> FetchRuntimeCode for WrappedRuntimeCode<'a> {
 pub struct NoneFetchRuntimeCode;
 
 impl FetchRuntimeCode for NoneFetchRuntimeCode {
-	fn fetch_runtime_code(&self) -> Option<Cow<[u8]>> {
+	fn fetch_runtime_code(&mut self) -> Option<Cow<[u8]>> {
 		None
 	}
 }
 
 /// The Wasm code of a Substrate runtime.
-#[derive(Clone)]
 pub struct RuntimeCode<'a> {
 	/// The code fetcher that can be used to lazily fetch the code.
-	pub code_fetcher: &'a dyn FetchRuntimeCode,
+	pub code_fetcher: &'a mut dyn FetchRuntimeCode,
 	/// The optional heap pages this `code` should be executed with.
 	///
 	/// If `None` are given, the default value of the executor will be used.
@@ -109,12 +108,12 @@ impl<'a> RuntimeCode<'a> {
 	///
 	/// This is only useful for tests that don't want to execute any code.
 	pub fn empty() -> Self {
-		Self { code_fetcher: &NoneFetchRuntimeCode, hash: Vec::new(), heap_pages: None }
+		Self { code_fetcher: &mut NoneFetchRuntimeCode, hash: Vec::new(), heap_pages: None }
 	}
 }
 
 impl<'a> FetchRuntimeCode for RuntimeCode<'a> {
-	fn fetch_runtime_code(&self) -> Option<Cow<[u8]>> {
+	fn fetch_runtime_code(&mut self) -> Option<Cow<[u8]>> {
 		self.code_fetcher.fetch_runtime_code()
 	}
 }

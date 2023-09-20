@@ -381,16 +381,16 @@ where
 	type TrieBackendStorage = S;
 	type RawIter = crate::trie_backend_essence::RawIter<S, H, C>;
 
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error> {
+	fn storage_hash(&mut self, key: &[u8]) -> Result<Option<H::Out>, Self::Error> {
 		self.essence.storage_hash(key)
 	}
 
-	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
+	fn storage(&mut self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error> {
 		self.essence.storage(key)
 	}
 
 	fn child_storage_hash(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<H::Out>, Self::Error> {
@@ -398,26 +398,29 @@ where
 	}
 
 	fn child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageValue>, Self::Error> {
 		self.essence.child_storage(child_info, key)
 	}
 
-	fn closest_merkle_value(&self, key: &[u8]) -> Result<Option<MerkleValue<H::Out>>, Self::Error> {
+	fn closest_merkle_value(
+		&mut self,
+		key: &[u8],
+	) -> Result<Option<MerkleValue<H::Out>>, Self::Error> {
 		self.essence.closest_merkle_value(key)
 	}
 
 	fn child_closest_merkle_value(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<MerkleValue<H::Out>>, Self::Error> {
 		self.essence.child_closest_merkle_value(child_info, key)
 	}
 
-	fn next_storage_key(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {
+	fn next_storage_key(&mut self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error> {
 		let (is_cached, mut cache) = access_cache(&self.next_storage_key_cache, Option::take)
 			.map(|cache| (cache.last_key == key, cache))
 			.unwrap_or_default();
@@ -455,19 +458,19 @@ where
 	}
 
 	fn next_child_storage_key(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageKey>, Self::Error> {
 		self.essence.next_child_storage_key(child_info, key)
 	}
 
-	fn raw_iter(&self, args: IterArgs) -> Result<Self::RawIter, Self::Error> {
+	fn raw_iter(&mut self, args: IterArgs) -> Result<Self::RawIter, Self::Error> {
 		self.essence.raw_iter(args)
 	}
 
 	fn storage_root<'a>(
-		&self,
+		&mut self,
 		delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
 		state_version: StateVersion,
 	) -> (H::Out, PrefixedMemoryDB<H>)
@@ -478,7 +481,7 @@ where
 	}
 
 	fn child_storage_root<'a>(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
 		state_version: StateVersion,
@@ -489,13 +492,13 @@ where
 		self.essence.child_storage_root(child_info, delta, state_version)
 	}
 
-	fn register_overlay_stats(&self, _stats: &crate::stats::StateMachineStats) {}
+	fn register_overlay_stats(&mut self, _stats: &crate::stats::StateMachineStats) {}
 
-	fn usage_info(&self) -> crate::UsageInfo {
+	fn usage_info(&mut self) -> crate::UsageInfo {
 		crate::UsageInfo::empty()
 	}
 
-	fn wipe(&self) -> Result<(), Self::Error> {
+	fn wipe(&mut self) -> Result<(), Self::Error> {
 		Ok(())
 	}
 }
@@ -504,7 +507,7 @@ where
 impl<S: TrieBackendStorage<H>, H: Hasher, C> AsTrieBackend<H, C> for TrieBackend<S, H, C> {
 	type TrieBackendStorage = S;
 
-	fn as_trie_backend(&self) -> &TrieBackend<S, H, C> {
+	fn as_trie_backend(&mut self) -> &mut TrieBackend<S, H, C> {
 		self
 	}
 }
@@ -1023,7 +1026,7 @@ pub mod tests {
 			.is_empty());
 	}
 
-	parameterized_test!(
+	parameterIzed_test!(
 		proof_is_non_empty_after_value_is_read,
 		proof_is_non_empty_after_value_is_read_inner
 	);

@@ -73,13 +73,13 @@ where
 	/// Fetches the next key from the storage.
 	fn next_key(
 		&mut self,
-		backend: &Self::Backend,
+		backend: &mut Self::Backend,
 	) -> Option<core::result::Result<StorageKey, Self::Error>>;
 
 	/// Fetches the next key and value from the storage.
 	fn next_pair(
 		&mut self,
-		backend: &Self::Backend,
+		backend: &mut Self::Backend,
 	) -> Option<core::result::Result<(StorageKey, StorageValue), Self::Error>>;
 
 	/// Returns whether the end of iteration was reached without an error.
@@ -92,7 +92,7 @@ where
 	H: Hasher,
 	I: StorageIterator<H>,
 {
-	backend: Option<&'a I::Backend>,
+	backend: Option<&'a mut I::Backend>,
 	raw_iter: I,
 	_phantom: PhantomData<H>,
 }
@@ -104,7 +104,7 @@ where
 {
 	type Item = Result<(Vec<u8>, Vec<u8>), <I as StorageIterator<H>>::Error>;
 	fn next(&mut self) -> Option<Self::Item> {
-		self.raw_iter.next_pair(self.backend.as_ref()?)
+		self.raw_iter.next_pair(self.backend.as_mut()?)
 	}
 }
 
@@ -151,7 +151,7 @@ where
 {
 	type Item = Result<Vec<u8>, <I as StorageIterator<H>>::Error>;
 	fn next(&mut self) -> Option<Self::Item> {
-		self.raw_iter.next_key(self.backend.as_ref()?)
+		self.raw_iter.next_key(self.backend.as_mut()?)
 	}
 }
 
@@ -190,43 +190,46 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	type RawIter: StorageIterator<H, Backend = Self, Error = Self::Error>;
 
 	/// Get keyed storage or None if there is nothing associated.
-	fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error>;
+	fn storage(&mut self, key: &[u8]) -> Result<Option<StorageValue>, Self::Error>;
 
 	/// Get keyed storage value hash or None if there is nothing associated.
-	fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>, Self::Error>;
+	fn storage_hash(&mut self, key: &[u8]) -> Result<Option<H::Out>, Self::Error>;
 
 	/// Get the merkle value or None if there is nothing associated.
-	fn closest_merkle_value(&self, key: &[u8]) -> Result<Option<MerkleValue<H::Out>>, Self::Error>;
+	fn closest_merkle_value(
+		&mut self,
+		key: &[u8],
+	) -> Result<Option<MerkleValue<H::Out>>, Self::Error>;
 
 	/// Get the child merkle value or None if there is nothing associated.
 	fn child_closest_merkle_value(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<MerkleValue<H::Out>>, Self::Error>;
 
 	/// Get child keyed child storage or None if there is nothing associated.
 	fn child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageValue>, Self::Error>;
 
 	/// Get child keyed storage value hash or None if there is nothing associated.
 	fn child_storage_hash(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<H::Out>, Self::Error>;
 
 	/// true if a key exists in storage.
-	fn exists_storage(&self, key: &[u8]) -> Result<bool, Self::Error> {
+	fn exists_storage(&mut self, key: &[u8]) -> Result<bool, Self::Error> {
 		Ok(self.storage_hash(key)?.is_some())
 	}
 
 	/// true if a key exists in child storage.
 	fn exists_child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<bool, Self::Error> {
@@ -234,11 +237,11 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	}
 
 	/// Return the next key in storage in lexicographic order or `None` if there is no value.
-	fn next_storage_key(&self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error>;
+	fn next_storage_key(&mut self, key: &[u8]) -> Result<Option<StorageKey>, Self::Error>;
 
 	/// Return the next key in child storage in lexicographic order or `None` if there is no value.
 	fn next_child_storage_key(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageKey>, Self::Error>;
@@ -247,7 +250,7 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	/// the backend, and produce a "transaction" that can be used to commit.
 	/// Does not include child storage updates.
 	fn storage_root<'a>(
-		&self,
+		&mut self,
 		delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
 		state_version: StateVersion,
 	) -> (H::Out, BackendTransaction<H>)
@@ -258,7 +261,7 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	/// the backend, and produce a "transaction" that can be used to commit. The second argument
 	/// is true if child storage root equals default storage root.
 	fn child_storage_root<'a>(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
 		state_version: StateVersion,
@@ -267,10 +270,13 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 		H::Out: Ord;
 
 	/// Returns a lifetimeless raw storage iterator.
-	fn raw_iter(&self, args: IterArgs) -> Result<Self::RawIter, Self::Error>;
+	fn raw_iter(&mut self, args: IterArgs) -> Result<Self::RawIter, Self::Error>;
 
 	/// Get an iterator over key/value pairs.
-	fn pairs<'a>(&'a self, args: IterArgs) -> Result<PairsIter<'a, H, Self::RawIter>, Self::Error> {
+	fn pairs<'a>(
+		&'a mut self,
+		args: IterArgs,
+	) -> Result<PairsIter<'a, H, Self::RawIter>, Self::Error> {
 		Ok(PairsIter {
 			backend: Some(self),
 			raw_iter: self.raw_iter(args)?,
@@ -279,7 +285,10 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	}
 
 	/// Get an iterator over keys.
-	fn keys<'a>(&'a self, args: IterArgs) -> Result<KeysIter<'a, H, Self::RawIter>, Self::Error> {
+	fn keys<'a>(
+		&'a mut self,
+		args: IterArgs,
+	) -> Result<KeysIter<'a, H, Self::RawIter>, Self::Error> {
 		Ok(KeysIter {
 			backend: Some(self),
 			raw_iter: self.raw_iter(args)?,
@@ -291,7 +300,7 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	/// in the backend, and produce a "transaction" that can be used to commit.
 	/// Does include child storage updates.
 	fn full_storage_root<'a>(
-		&self,
+		&mut self,
 		delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
 		child_deltas: impl Iterator<
 			Item = (&'a ChildInfo, impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>),
@@ -329,22 +338,22 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	/// Register stats from overlay of state machine.
 	///
 	/// By default nothing is registered.
-	fn register_overlay_stats(&self, _stats: &crate::stats::StateMachineStats);
+	fn register_overlay_stats(&mut self, _stats: &crate::stats::StateMachineStats);
 
 	/// Query backend usage statistics (i/o, memory)
 	///
 	/// Not all implementations are expected to be able to do this. In the
 	/// case when they don't, empty statistics is returned.
-	fn usage_info(&self) -> UsageInfo;
+	fn usage_info(&mut self) -> UsageInfo;
 
 	/// Wipe the state database.
-	fn wipe(&self) -> Result<(), Self::Error> {
+	fn wipe(&mut self) -> Result<(), Self::Error> {
 		unimplemented!()
 	}
 
 	/// Commit given transaction to storage.
 	fn commit(
-		&self,
+		&mut self,
 		_: H::Out,
 		_: BackendTransaction<H>,
 		_: StorageCollection,
@@ -354,30 +363,30 @@ pub trait Backend<H: Hasher>: sp_std::fmt::Debug {
 	}
 
 	/// Get the read/write count of the db
-	fn read_write_count(&self) -> (u32, u32, u32, u32) {
+	fn read_write_count(&mut self) -> (u32, u32, u32, u32) {
 		unimplemented!()
 	}
 
 	/// Get the read/write count of the db
-	fn reset_read_write_count(&self) {
+	fn reset_read_write_count(&mut self) {
 		unimplemented!()
 	}
 
 	/// Get the whitelist for tracking db reads/writes
-	fn get_whitelist(&self) -> Vec<TrackedStorageKey> {
+	fn get_whitelist(&mut self) -> Vec<TrackedStorageKey> {
 		Default::default()
 	}
 
 	/// Update the whitelist for tracking db reads/writes
-	fn set_whitelist(&self, _: Vec<TrackedStorageKey>) {}
+	fn set_whitelist(&mut self, _: Vec<TrackedStorageKey>) {}
 
 	/// Estimate proof size
-	fn proof_size(&self) -> Option<u32> {
+	fn proof_size(&mut self) -> Option<u32> {
 		unimplemented!()
 	}
 
 	/// Extend storage info for benchmarking db
-	fn get_read_and_written_keys(&self) -> Vec<(Vec<u8>, u32, u32, bool)> {
+	fn get_read_and_written_keys(&mut self) -> Vec<(Vec<u8>, u32, u32, bool)> {
 		unimplemented!()
 	}
 }
@@ -389,13 +398,13 @@ pub trait AsTrieBackend<H: Hasher, C = sp_trie::cache::LocalTrieCache<H>> {
 	type TrieBackendStorage: TrieBackendStorage<H>;
 
 	/// Return the type as [`TrieBackend`].
-	fn as_trie_backend(&self) -> &TrieBackend<Self::TrieBackendStorage, H, C>;
+	fn as_trie_backend(&mut self) -> &mut TrieBackend<Self::TrieBackendStorage, H, C>;
 }
 
 /// Wrapper to create a [`RuntimeCode`] from a type that implements [`Backend`].
 #[cfg(feature = "std")]
 pub struct BackendRuntimeCode<'a, B, H> {
-	backend: &'a B,
+	backend: &'a mut B,
 	_marker: PhantomData<H>,
 }
 
@@ -403,7 +412,7 @@ pub struct BackendRuntimeCode<'a, B, H> {
 impl<'a, B: Backend<H>, H: Hasher> sp_core::traits::FetchRuntimeCode
 	for BackendRuntimeCode<'a, B, H>
 {
-	fn fetch_runtime_code(&self) -> Option<std::borrow::Cow<[u8]>> {
+	fn fetch_runtime_code(&mut self) -> Option<std::borrow::Cow<[u8]>> {
 		self.backend
 			.storage(sp_core::storage::well_known_keys::CODE)
 			.ok()

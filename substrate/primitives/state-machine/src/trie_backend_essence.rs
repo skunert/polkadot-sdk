@@ -106,7 +106,7 @@ where
 	#[inline]
 	fn prepare<R>(
 		&mut self,
-		backend: &TrieBackendEssence<S, H, C>,
+		backend: &mut TrieBackendEssence<S, H, C>,
 		callback: impl FnOnce(
 			&sp_trie::TrieDB<Layout<H>>,
 			&mut TrieDBRawIterator<Layout<H>>,
@@ -167,9 +167,9 @@ where
 	type Error = crate::DefaultError;
 
 	#[inline]
-	fn next_key(&mut self, backend: &Self::Backend) -> Option<Result<StorageKey>> {
+	fn next_key(&mut self, backend: &mut Self::Backend) -> Option<Result<StorageKey>> {
 		let skip_if_first = self.skip_if_first.take();
-		self.prepare(&backend.essence, |trie, trie_iter| {
+		self.prepare(&mut backend.essence, |trie, trie_iter| {
 			let mut result = trie_iter.next_key(&trie);
 			if let Some(skipped_key) = skip_if_first {
 				if let Some(Ok(ref key)) = result {
@@ -183,9 +183,12 @@ where
 	}
 
 	#[inline]
-	fn next_pair(&mut self, backend: &Self::Backend) -> Option<Result<(StorageKey, StorageValue)>> {
+	fn next_pair(
+		&mut self,
+		backend: &mut Self::Backend,
+	) -> Option<Result<(StorageKey, StorageValue)>> {
 		let skip_if_first = self.skip_if_first.take();
-		self.prepare(&backend.essence, |trie, trie_iter| {
+		self.prepare(&mut backend.essence, |trie, trie_iter| {
 			let mut result = trie_iter.next_item(&trie);
 			if let Some(skipped_key) = skip_if_first {
 				if let Some(Ok((ref key, _))) = result {
@@ -295,7 +298,7 @@ impl<S: TrieBackendStorage<H>, H: Hasher, C: TrieCacheProvider<H>> TrieBackendEs
 	/// If the given `storage_root` is `None`, `self.root` will be used.
 	#[inline]
 	fn with_recorder_and_cache<R>(
-		&self,
+		&mut self,
 		storage_root: Option<H::Out>,
 		callback: impl FnOnce(
 			Option<&mut dyn TrieRecorder<H::Out>>,
@@ -396,7 +399,7 @@ where
 	/// storage root and (optionally) child trie.
 	#[inline]
 	fn with_trie_db<R>(
-		&self,
+		&mut self,
 		root: H::Out,
 		child_info: Option<&ChildInfo>,
 		callback: impl FnOnce(&sp_trie::TrieDB<Layout<H>>) -> R,
@@ -424,12 +427,12 @@ where
 	/// Used only when debug assertions are enabled to crosscheck the results of finding
 	/// the next key through an iterator.
 	#[cfg(debug_assertions)]
-	pub fn next_storage_key_slow(&self, key: &[u8]) -> Result<Option<StorageKey>> {
+	pub fn next_storage_key_slow(&mut self, key: &[u8]) -> Result<Option<StorageKey>> {
 		self.next_storage_key_from_root(&self.root, None, key)
 	}
 
 	/// Access the root of the child storage in its parent trie
-	fn child_root(&self, child_info: &ChildInfo) -> Result<Option<H::Out>> {
+	fn child_root(&mut self, child_info: &ChildInfo) -> Result<Option<H::Out>> {
 		#[cfg(feature = "std")]
 		{
 			if let Some(result) = self.cache.read().child_root.get(child_info.storage_key()) {
@@ -457,7 +460,7 @@ where
 	/// Return the next key in the child trie i.e. the minimum key that is strictly superior to
 	/// `key` in lexicographic order.
 	pub fn next_child_storage_key(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageKey>> {
@@ -471,7 +474,7 @@ where
 
 	/// Return next key from main trie or child trie by providing corresponding root.
 	fn next_storage_key_from_root(
-		&self,
+		&mut self,
 		root: &H::Out,
 		child_info: Option<&ChildInfo>,
 		key: &[u8],
@@ -505,7 +508,7 @@ where
 	}
 
 	/// Returns the hash value
-	pub fn storage_hash(&self, key: &[u8]) -> Result<Option<H::Out>> {
+	pub fn storage_hash(&mut self, key: &[u8]) -> Result<Option<H::Out>> {
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
 		self.with_recorder_and_cache(None, |recorder, cache| {
@@ -519,7 +522,7 @@ where
 	}
 
 	/// Get the value of storage at given key.
-	pub fn storage(&self, key: &[u8]) -> Result<Option<StorageValue>> {
+	pub fn storage(&mut self, key: &[u8]) -> Result<Option<StorageValue>> {
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
 		self.with_recorder_and_cache(None, |recorder, cache| {
@@ -528,7 +531,11 @@ where
 	}
 
 	/// Returns the hash value
-	pub fn child_storage_hash(&self, child_info: &ChildInfo, key: &[u8]) -> Result<Option<H::Out>> {
+	pub fn child_storage_hash(
+		&mut self,
+		child_info: &ChildInfo,
+		key: &[u8],
+	) -> Result<Option<H::Out>> {
 		let child_root = match self.child_root(child_info)? {
 			Some(root) => root,
 			None => return Ok(None),
@@ -551,7 +558,7 @@ where
 
 	/// Get the value of child storage at given key.
 	pub fn child_storage(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<StorageValue>> {
@@ -576,7 +583,7 @@ where
 	}
 
 	/// Get the closest merkle value at given key.
-	pub fn closest_merkle_value(&self, key: &[u8]) -> Result<Option<MerkleValue<H::Out>>> {
+	pub fn closest_merkle_value(&mut self, key: &[u8]) -> Result<Option<MerkleValue<H::Out>>> {
 		let map_e = |e| format!("Trie lookup error: {}", e);
 
 		self.with_recorder_and_cache(None, |recorder, cache| {
@@ -587,7 +594,7 @@ where
 
 	/// Get the child closest merkle value at given key.
 	pub fn child_closest_merkle_value(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		key: &[u8],
 	) -> Result<Option<MerkleValue<H::Out>>> {
@@ -609,7 +616,7 @@ where
 	}
 
 	/// Create a raw iterator over the storage.
-	pub fn raw_iter(&self, args: IterArgs) -> Result<RawIter<S, H, C>> {
+	pub fn raw_iter(&mut self, args: IterArgs) -> Result<RawIter<S, H, C>> {
 		let root = if let Some(child_info) = args.child_info.as_ref() {
 			let root = match self.child_root(&child_info)? {
 				Some(root) => root,
@@ -653,7 +660,7 @@ where
 
 	/// Return the storage root after applying the given `delta`.
 	pub fn storage_root<'a>(
-		&self,
+		&mut self,
 		delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
 		state_version: StateVersion,
 	) -> (H::Out, PrefixedMemoryDB<H>) {
@@ -685,7 +692,7 @@ where
 	/// Returns the child storage root for the child trie `child_info` after applying the given
 	/// `delta`.
 	pub fn child_storage_root<'a>(
-		&self,
+		&mut self,
 		child_info: &ChildInfo,
 		delta: impl Iterator<Item = (&'a [u8], Option<&'a [u8]>)>,
 		state_version: StateVersion,

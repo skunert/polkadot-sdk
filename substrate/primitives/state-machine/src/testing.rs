@@ -62,7 +62,7 @@ where
 {
 	/// Get externalities implementation.
 	pub fn ext(&mut self) -> Ext<H, InMemoryBackend<H>> {
-		Ext::new(&mut self.overlay, &self.backend, Some(&mut self.extensions))
+		Ext::new(&mut self.overlay, &mut self.backend, Some(&mut self.extensions))
 	}
 
 	/// Create a new instance of `TestExternalities` with storage.
@@ -230,7 +230,7 @@ where
 	///
 	/// This will panic if there are still open transactions.
 	pub fn commit_all(&mut self) -> Result<(), String> {
-		let changes = self.overlay.drain_storage_changes(&self.backend, self.state_version)?;
+		let changes = self.overlay.drain_storage_changes(&mut self.backend, self.state_version)?;
 
 		self.backend
 			.apply_transaction(changes.transaction_storage_root, changes.transaction);
@@ -251,11 +251,11 @@ where
 	/// This implementation will wipe the proof recorded in between calls. Consecutive calls will
 	/// get their own proof from scratch.
 	pub fn execute_and_prove<R>(&mut self, execute: impl FnOnce() -> R) -> (R, StorageProof) {
-		let proving_backend = TrieBackendBuilder::wrap(&self.backend)
+		let mut proving_backend = TrieBackendBuilder::wrap(&self.backend)
 			.with_recorder(Default::default())
 			.build();
 		let mut proving_ext =
-			Ext::new(&mut self.overlay, &proving_backend, Some(&mut self.extensions));
+			Ext::new(&mut self.overlay, &mut proving_backend, Some(&mut self.extensions));
 
 		let outcome = sp_externalities::set_and_run_with_externalities(&mut proving_ext, execute);
 		let proof = proving_backend.extract_proof().expect("Failed to extract storage proof");

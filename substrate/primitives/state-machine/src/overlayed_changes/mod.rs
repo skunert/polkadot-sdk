@@ -554,7 +554,7 @@ impl<H: Hasher> OverlayedChanges<H> {
 	/// Drain all changes into a [`StorageChanges`] instance. Leave empty overlay in place.
 	pub fn drain_storage_changes<B: Backend<H>>(
 		&mut self,
-		backend: &B,
+		backend: &mut B,
 		state_version: StateVersion,
 	) -> Result<StorageChanges<H>, DefaultError>
 	where
@@ -622,7 +622,7 @@ impl<H: Hasher> OverlayedChanges<H> {
 	/// Returns the storage root and whether it was already cached.
 	pub fn storage_root<B: Backend<H>>(
 		&mut self,
-		backend: &B,
+		backend: &mut B,
 		state_version: StateVersion,
 	) -> (H::Out, bool)
 	where
@@ -652,7 +652,7 @@ impl<H: Hasher> OverlayedChanges<H> {
 	pub fn child_storage_root<B: Backend<H>>(
 		&mut self,
 		child_info: &ChildInfo,
-		backend: &B,
+		backend: &mut B,
 		state_version: StateVersion,
 	) -> Result<(H::Out, bool), B::Error>
 	where
@@ -978,7 +978,7 @@ mod tests {
 		overlay.set_storage(b"doug".to_vec(), None);
 
 		{
-			let mut ext = Ext::new(&mut overlay, &backend, None);
+			let mut ext = Ext::new(&mut overlay, &mut backend, None);
 			let root = "39245109cef3758c2eed2ccba8d9b370a917850af3824bc8348d505df2c298fa";
 
 			assert_eq!(bytes2hex("", &ext.storage_root(state_version)), root);
@@ -989,7 +989,7 @@ mod tests {
 		// Check that the storage root is recalculated
 		overlay.set_storage(b"doug2".to_vec(), Some(b"yes".to_vec()));
 
-		let mut ext = Ext::new(&mut overlay, &backend, None);
+		let mut ext = Ext::new(&mut overlay, &mut backend, None);
 		let root = "5c0a4e35cb967de785e1cb8743e6f24b6ff6d45155317f2078f6eb3fc4ff3e3d";
 		assert_eq!(bytes2hex("", &ext.storage_root(state_version)), root);
 	}
@@ -1010,7 +1010,7 @@ mod tests {
 		overlay.set_child_storage(child_info, vec![30], None);
 
 		{
-			let mut ext = Ext::new(&mut overlay, &backend, None);
+			let mut ext = Ext::new(&mut overlay, &mut backend, None);
 			let child_root = "c02965e1df4dc5baf6977390ce67dab1d7a9b27a87c1afe27b50d29cc990e0f5";
 			let root = "eafb765909c3ed5afd92a0c564acf4620d0234b31702e8e8e9b48da72a748838";
 
