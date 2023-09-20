@@ -160,27 +160,27 @@ impl From<BTreeMap<StorageKey, StorageValue>> for BasicExternalities {
 impl Externalities for BasicExternalities {
 	fn set_offchain_storage(&mut self, _key: &[u8], _value: Option<&[u8]>) {}
 
-	fn storage(&self, key: &[u8]) -> Option<StorageValue> {
+	fn storage(&mut self, key: &[u8]) -> Option<StorageValue> {
 		self.overlay.storage(key).and_then(|v| v.map(|v| v.to_vec()))
 	}
 
-	fn storage_hash(&self, key: &[u8]) -> Option<Vec<u8>> {
+	fn storage_hash(&mut self, key: &[u8]) -> Option<Vec<u8>> {
 		self.storage(key).map(|v| Blake2Hasher::hash(&v).encode())
 	}
 
-	fn child_storage(&self, child_info: &ChildInfo, key: &[u8]) -> Option<StorageValue> {
+	fn child_storage(&mut self, child_info: &ChildInfo, key: &[u8]) -> Option<StorageValue> {
 		self.overlay.child_storage(child_info, key).and_then(|v| v.map(|v| v.to_vec()))
 	}
 
-	fn child_storage_hash(&self, child_info: &ChildInfo, key: &[u8]) -> Option<Vec<u8>> {
+	fn child_storage_hash(&mut self, child_info: &ChildInfo, key: &[u8]) -> Option<Vec<u8>> {
 		self.child_storage(child_info, key).map(|v| Blake2Hasher::hash(&v).encode())
 	}
 
-	fn next_storage_key(&self, key: &[u8]) -> Option<StorageKey> {
+	fn next_storage_key(&mut self, key: &[u8]) -> Option<StorageKey> {
 		self.overlay.iter_after(key).find_map(|(k, v)| v.value().map(|_| k.to_vec()))
 	}
 
-	fn next_child_storage_key(&self, child_info: &ChildInfo, key: &[u8]) -> Option<StorageKey> {
+	fn next_child_storage_key(&mut self, child_info: &ChildInfo, key: &[u8]) -> Option<StorageKey> {
 		self.overlay
 			.child_iter_after(child_info.storage_key(), key)
 			.find_map(|(k, v)| v.value().map(|_| k.to_vec()))
@@ -307,7 +307,7 @@ impl Externalities for BasicExternalities {
 
 	fn commit(&mut self) {}
 
-	fn read_write_count(&self) -> (u32, u32, u32, u32) {
+	fn read_write_count(&mut self) -> (u32, u32, u32, u32) {
 		unimplemented!("read_write_count is not supported in Basic")
 	}
 
@@ -315,7 +315,7 @@ impl Externalities for BasicExternalities {
 		unimplemented!("reset_read_write_count is not supported in Basic")
 	}
 
-	fn get_whitelist(&self) -> Vec<TrackedStorageKey> {
+	fn get_whitelist(&mut self) -> Vec<TrackedStorageKey> {
 		unimplemented!("get_whitelist is not supported in Basic")
 	}
 
@@ -323,7 +323,7 @@ impl Externalities for BasicExternalities {
 		unimplemented!("set_whitelist is not supported in Basic")
 	}
 
-	fn get_read_and_written_keys(&self) -> Vec<(Vec<u8>, u32, u32, bool)> {
+	fn get_read_and_written_keys(&mut self) -> Vec<(Vec<u8>, u32, u32, bool)> {
 		unimplemented!("get_read_and_written_keys is not supported in Basic")
 	}
 }

@@ -267,7 +267,7 @@ pub trait Benchmarking {
 	}
 
 	/// Get the read/write count.
-	fn read_write_count(&self) -> (u32, u32, u32, u32) {
+	fn read_write_count(&mut self) -> (u32, u32, u32, u32) {
 		self.read_write_count()
 	}
 
@@ -277,7 +277,7 @@ pub trait Benchmarking {
 	}
 
 	/// Get the DB whitelist.
-	fn get_whitelist(&self) -> Vec<TrackedStorageKey> {
+	fn get_whitelist(&mut self) -> Vec<TrackedStorageKey> {
 		self.get_whitelist()
 	}
 
@@ -312,12 +312,12 @@ pub trait Benchmarking {
 		self.set_whitelist(whitelist);
 	}
 
-	fn get_read_and_written_keys(&self) -> Vec<(Vec<u8>, u32, u32, bool)> {
+	fn get_read_and_written_keys(&mut self) -> Vec<(Vec<u8>, u32, u32, bool)> {
 		self.get_read_and_written_keys()
 	}
 
 	/// Get current estimated proof size.
-	fn proof_size(&self) -> Option<u32> {
+	fn proof_size(&mut self) -> Option<u32> {
 		self.proof_size()
 	}
 }

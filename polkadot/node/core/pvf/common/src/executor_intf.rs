@@ -207,19 +207,19 @@ type HostFunctions = (
 struct ValidationExternalities(sp_externalities::Extensions);
 
 impl sp_externalities::Externalities for ValidationExternalities {
-	fn storage(&self, _: &[u8]) -> Option<Vec<u8>> {
+	fn storage(&mut self, _: &[u8]) -> Option<Vec<u8>> {
 		panic!("storage: unsupported feature for parachain validation")
 	}
 
-	fn storage_hash(&self, _: &[u8]) -> Option<Vec<u8>> {
+	fn storage_hash(&mut self, _: &[u8]) -> Option<Vec<u8>> {
 		panic!("storage_hash: unsupported feature for parachain validation")
 	}
 
-	fn child_storage_hash(&self, _: &ChildInfo, _: &[u8]) -> Option<Vec<u8>> {
+	fn child_storage_hash(&mut self, _: &ChildInfo, _: &[u8]) -> Option<Vec<u8>> {
 		panic!("child_storage_hash: unsupported feature for parachain validation")
 	}
 
-	fn child_storage(&self, _: &ChildInfo, _: &[u8]) -> Option<Vec<u8>> {
+	fn child_storage(&mut self, _: &ChildInfo, _: &[u8]) -> Option<Vec<u8>> {
 		panic!("child_storage: unsupported feature for parachain validation")
 	}
 
@@ -267,11 +267,11 @@ impl sp_externalities::Externalities for ValidationExternalities {
 		panic!("child_storage_root: unsupported feature for parachain validation")
 	}
 
-	fn next_child_storage_key(&self, _: &ChildInfo, _: &[u8]) -> Option<Vec<u8>> {
+	fn next_child_storage_key(&mut self, _: &ChildInfo, _: &[u8]) -> Option<Vec<u8>> {
 		panic!("next_child_storage_key: unsupported feature for parachain validation")
 	}
 
-	fn next_storage_key(&self, _: &[u8]) -> Option<Vec<u8>> {
+	fn next_storage_key(&mut self, _: &[u8]) -> Option<Vec<u8>> {
 		panic!("next_storage_key: unsupported feature for parachain validation")
 	}
 
@@ -299,7 +299,7 @@ impl sp_externalities::Externalities for ValidationExternalities {
 		panic!("commit: unsupported feature for parachain validation")
 	}
 
-	fn read_write_count(&self) -> (u32, u32, u32, u32) {
+	fn read_write_count(&mut self) -> (u32, u32, u32, u32) {
 		panic!("read_write_count: unsupported feature for parachain validation")
 	}
 
@@ -307,7 +307,7 @@ impl sp_externalities::Externalities for ValidationExternalities {
 		panic!("reset_read_write_count: unsupported feature for parachain validation")
 	}
 
-	fn get_whitelist(&self) -> Vec<TrackedStorageKey> {
+	fn get_whitelist(&mut self) -> Vec<TrackedStorageKey> {
 		panic!("get_whitelist: unsupported feature for parachain validation")
 	}
 
@@ -319,7 +319,7 @@ impl sp_externalities::Externalities for ValidationExternalities {
 		panic!("set_offchain_storage: unsupported feature for parachain validation")
 	}
 
-	fn get_read_and_written_keys(&self) -> Vec<(Vec<u8>, u32, u32, bool)> {
+	fn get_read_and_written_keys(&mut self) -> Vec<(Vec<u8>, u32, u32, bool)> {
 		panic!("get_read_and_written_keys: unsupported feature for parachain validation")
 	}
 }

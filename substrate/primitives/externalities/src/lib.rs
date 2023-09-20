@@ -84,24 +84,24 @@ pub trait Externalities: ExtensionStore {
 	fn set_offchain_storage(&mut self, key: &[u8], value: Option<&[u8]>);
 
 	/// Read runtime storage.
-	fn storage(&self, key: &[u8]) -> Option<Vec<u8>>;
+	fn storage(&mut self, key: &[u8]) -> Option<Vec<u8>>;
 
 	/// Get storage value hash.
 	///
 	/// This may be optimized for large values.
-	fn storage_hash(&self, key: &[u8]) -> Option<Vec<u8>>;
+	fn storage_hash(&mut self, key: &[u8]) -> Option<Vec<u8>>;
 
 	/// Get child storage value hash.
 	///
 	/// This may be optimized for large values.
 	///
 	/// Returns an `Option` that holds the SCALE encoded hash.
-	fn child_storage_hash(&self, child_info: &ChildInfo, key: &[u8]) -> Option<Vec<u8>>;
+	fn child_storage_hash(&mut self, child_info: &ChildInfo, key: &[u8]) -> Option<Vec<u8>>;
 
 	/// Read child runtime storage.
 	///
 	/// Returns an `Option` that holds the SCALE encoded hash.
-	fn child_storage(&self, child_info: &ChildInfo, key: &[u8]) -> Option<Vec<u8>>;
+	fn child_storage(&mut self, child_info: &ChildInfo, key: &[u8]) -> Option<Vec<u8>>;
 
 	/// Set storage entry `key` of current contract being called (effective immediately).
 	fn set_storage(&mut self, key: Vec<u8>, value: Vec<u8>) {
@@ -125,20 +125,20 @@ pub trait Externalities: ExtensionStore {
 	}
 
 	/// Whether a storage entry exists.
-	fn exists_storage(&self, key: &[u8]) -> bool {
+	fn exists_storage(&mut self, key: &[u8]) -> bool {
 		self.storage(key).is_some()
 	}
 
 	/// Whether a child storage entry exists.
-	fn exists_child_storage(&self, child_info: &ChildInfo, key: &[u8]) -> bool {
+	fn exists_child_storage(&mut self, child_info: &ChildInfo, key: &[u8]) -> bool {
 		self.child_storage(child_info, key).is_some()
 	}
 
 	/// Returns the key immediately following the given key, if it exists.
-	fn next_storage_key(&self, key: &[u8]) -> Option<Vec<u8>>;
+	fn next_storage_key(&mut self, key: &[u8]) -> Option<Vec<u8>>;
 
 	/// Returns the key immediately following the given key, if it exists, in child storage.
-	fn next_child_storage_key(&self, child_info: &ChildInfo, key: &[u8]) -> Option<Vec<u8>>;
+	fn next_child_storage_key(&mut self, child_info: &ChildInfo, key: &[u8]) -> Option<Vec<u8>>;
 
 	/// Clear an entire child storage.
 	///
@@ -270,7 +270,7 @@ pub trait Externalities: ExtensionStore {
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	///
 	/// Gets the current read/write count for the benchmarking process.
-	fn read_write_count(&self) -> (u32, u32, u32, u32);
+	fn read_write_count(&mut self) -> (u32, u32, u32, u32);
 
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	/// Benchmarking related functionality and shouldn't be used anywhere else!
@@ -284,7 +284,7 @@ pub trait Externalities: ExtensionStore {
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	///
 	/// Gets the current DB tracking whitelist.
-	fn get_whitelist(&self) -> Vec<TrackedStorageKey>;
+	fn get_whitelist(&mut self) -> Vec<TrackedStorageKey>;
 
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	/// Benchmarking related functionality and shouldn't be used anywhere else!
@@ -299,7 +299,7 @@ pub trait Externalities: ExtensionStore {
 	///
 	/// Returns estimated proof size for the state queries so far.
 	/// Proof is reset on commit and wipe.
-	fn proof_size(&self) -> Option<u32> {
+	fn proof_size(&mut self) -> Option<u32> {
 		None
 	}
 
@@ -308,7 +308,7 @@ pub trait Externalities: ExtensionStore {
 	/// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 	///
 	/// Get all the keys that have been read or written to during the benchmark.
-	fn get_read_and_written_keys(&self) -> Vec<(Vec<u8>, u32, u32, bool)>;
+	fn get_read_and_written_keys(&mut self) -> Vec<(Vec<u8>, u32, u32, bool)>;
 }
 
 /// Extension for the [`Externalities`] trait.
