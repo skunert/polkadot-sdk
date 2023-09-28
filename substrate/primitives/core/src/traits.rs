@@ -108,7 +108,7 @@ impl<'a> RuntimeCode<'a> {
 	///
 	/// This is only useful for tests that don't want to execute any code.
 	pub fn empty() -> Self {
-		Self { code_fetcher: &mut NoneFetchRuntimeCode, hash: Vec::new(), heap_pages: None }
+		Self { code_fetcher: todo!(), hash: Vec::new(), heap_pages: None }
 	}
 }
 

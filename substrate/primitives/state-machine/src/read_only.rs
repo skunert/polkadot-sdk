@@ -40,15 +40,15 @@ pub trait InspectState<H: Hasher, B: Backend<H>> {
 	/// closure will be run against it.
 	///
 	/// Returns the result of the closure.
-	fn inspect_state<F: FnOnce() -> R, R>(&self, f: F) -> R;
+	fn inspect_state<F: FnOnce() -> R, R>(&mut self, f: F) -> R;
 }
 
 impl<H: Hasher, B: Backend<H>> InspectState<H, B> for B
 where
 	H::Out: Encode,
 {
-	fn inspect_state<F: FnOnce() -> R, R>(&self, f: F) -> R {
-		ReadOnlyExternalities::from(self).execute_with(f)
+	fn inspect_state<F: FnOnce() -> R, R>(&mut self, f: F) -> R {
+		ReadOnlyExternalities::from_backend(self).execute_with(f)
 	}
 }
 
@@ -62,12 +62,6 @@ pub struct ReadOnlyExternalities<'a, H: Hasher, B: 'a + Backend<H>> {
 	_phantom: PhantomData<H>,
 }
 
-impl<'a, H: Hasher, B: 'a + Backend<H>> From<&'a B> for ReadOnlyExternalities<'a, H, B> {
-	fn from(backend: &'a B) -> Self {
-		ReadOnlyExternalities { backend, _phantom: PhantomData }
-	}
-}
-
 impl<'a, H: Hasher, B: 'a + Backend<H>> ReadOnlyExternalities<'a, H, B>
 where
 	H::Out: Encode,
@@ -77,6 +71,9 @@ where
 	/// Returns the result of the given closure.
 	pub fn execute_with<R>(&mut self, f: impl FnOnce() -> R) -> R {
 		sp_externalities::set_and_run_with_externalities(self, f)
+	}
+	fn from_backend(backend: &'a mut B) -> Self {
+		ReadOnlyExternalities { backend, _phantom: Default::default() }
 	}
 }
 

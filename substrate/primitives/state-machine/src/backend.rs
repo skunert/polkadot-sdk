@@ -427,12 +427,12 @@ where
 	H::Out: Encode,
 {
 	/// Create a new instance.
-	pub fn new(backend: &'a B) -> Self {
+	pub fn new(backend: &'a mut B) -> Self {
 		Self { backend, _marker: PhantomData }
 	}
 
 	/// Return the [`RuntimeCode`] build from the wrapped `backend`.
-	pub fn runtime_code(&self) -> Result<RuntimeCode, &'static str> {
+	pub fn runtime_code(&mut self) -> Result<RuntimeCode, &'static str> {
 		let hash = self
 			.backend
 			.storage_hash(sp_core::storage::well_known_keys::CODE)
