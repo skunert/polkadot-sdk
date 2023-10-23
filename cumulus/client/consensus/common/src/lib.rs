@@ -182,12 +182,6 @@ where
 			params.finalized = true;
 		}
 
-		// Best block is determined by the relay chain, or if we are doing the initial sync
-		// we import all blocks as new best.
-		params.fork_choice = Some(sc_consensus::ForkChoiceStrategy::Custom(
-			params.origin == sp_consensus::BlockOrigin::NetworkInitialSync,
-		));
-
 		let maybe_lock = self.monitor.as_ref().map(|monitor_lock| {
 			let mut monitor = monitor_lock.shared_data_locked();
 			monitor.enforce_limit(number);
