@@ -185,7 +185,7 @@ where
 	)
 }
 
-/// Relevant client configuration items relevant for the client.
+/// Client configuration items.
 #[derive(Debug, Clone)]
 pub struct ClientConfig<Block: BlockT> {
 	/// Enable the offchain worker db.
@@ -199,6 +199,8 @@ pub struct ClientConfig<Block: BlockT> {
 	/// Map of WASM runtime substitute starting at the child of the given block until the runtime
 	/// version doesn't match anymore.
 	pub wasm_runtime_substitutes: HashMap<NumberFor<Block>, Vec<u8>>,
+	/// Enable recording of storage proofs during block import
+	pub enable_import_proof_recording: bool,
 }
 
 impl<Block: BlockT> Default for ClientConfig<Block> {
@@ -209,6 +211,7 @@ impl<Block: BlockT> Default for ClientConfig<Block> {
 			wasm_runtime_overrides: None,
 			no_genesis: false,
 			wasm_runtime_substitutes: HashMap::new(),
+			enable_import_proof_recording: false,
 		}
 	}
 }
@@ -858,6 +861,10 @@ where
 				let mut runtime_api = self.runtime_api();
 
 				runtime_api.set_call_context(CallContext::Onchain);
+
+				if self.config.enable_import_proof_recording {
+					runtime_api.record_proof();
+				}
 
 				runtime_api.execute_block(
 					*parent_hash,
@@ -1740,11 +1747,16 @@ where
 	fn initialize_extensions(
 		&self,
 		at: Block::Hash,
+		recorder: Option<&sp_trie::recorder::Recorder<HashingFor<Block>>>,
 		extensions: &mut sp_externalities::Extensions,
 	) -> Result<(), sp_api::ApiError> {
 		let block_number = self.expect_block_number_from_id(&BlockId::Hash(at))?;
 
-		extensions.merge(self.executor.execution_extensions().extensions(at, block_number));
+		extensions.merge(self.executor.execution_extensions().extensions(
+			at,
+			block_number,
+			recorder,
+		));
 
 		Ok(())
 	}

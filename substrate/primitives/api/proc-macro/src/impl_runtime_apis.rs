@@ -38,7 +38,7 @@ use syn::{
 	Attribute, Ident, ImplItem, ItemImpl, LitInt, LitStr, Path, Signature, Type, TypePath,
 };
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 /// The structure used for parsing the runtime api implementations.
 struct RuntimeApiImpls {
@@ -584,6 +584,7 @@ impl<'a> ApiRuntimeImplToApiRuntimeApiImpl<'a> {
 							#crate_::CallApiAt::<__SrApiBlock__>::initialize_extensions(
 								self.call,
 								at,
+								self.recorder.as_ref(),
 								&mut std::cell::RefCell::borrow_mut(&self.extensions),
 							)?;
 
@@ -726,7 +727,7 @@ fn populate_runtime_api_versions(
 fn generate_runtime_api_versions(impls: &[ItemImpl]) -> Result<TokenStream> {
 	let mut result = Vec::<TokenStream>::with_capacity(impls.len());
 	let mut sections = Vec::<TokenStream>::with_capacity(impls.len());
-	let mut processed_traits = HashSet::new();
+	let mut processed_traits = HashMap::new();
 
 	let c = generate_crate_access();
 
@@ -746,13 +747,17 @@ fn generate_runtime_api_versions(impls: &[ItemImpl]) -> Result<TokenStream> {
 			.ident;
 
 		let span = trait_.span();
-		if !processed_traits.insert(trait_) {
-			return Err(Error::new(
+		if let Some(other_span) = processed_traits.insert(trait_, span) {
+			let mut error = Error::new(
 				span,
 				"Two traits with the same name detected! \
 					The trait name is used to generate its ID. \
 					Please rename one trait at the declaration!",
-			))
+			);
+
+			error.combine(Error::new(other_span, "First trait implementation."));
+
+			return Err(error)
 		}
 
 		let id: Path = parse_quote!( #path ID );
@@ -837,7 +842,7 @@ fn impl_runtime_apis_impl_inner(api_impls: &[ItemImpl]) -> Result<TokenStream> {
 	);
 
 	let impl_ = expander::Expander::new("impl_runtime_apis")
-		.dry(std::env::var("SP_API_EXPAND").is_err())
+		.dry(std::env::var("EXPAND_MACROS").is_err())
 		.verbose(true)
 		.write_to_out_dir(impl_)
 		.expect("Does not fail because of IO in OUT_DIR; qed");

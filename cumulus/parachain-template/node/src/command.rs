@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use cumulus_client_service::pov_reclaim_host_functions::HostFunctions as ReclaimHostFunctions;
 use cumulus_primitives_core::ParaId;
 use frame_benchmarking_cli::{BenchmarkCmd, SUBSTRATE_REFERENCE_HARDWARE};
 use log::info;
@@ -50,7 +51,7 @@ impl SubstrateCli for Cli {
 	}
 
 	fn support_url() -> String {
-		"https://github.com/paritytech/cumulus/issues/new".into()
+		"https://github.com/paritytech/polkadot-sdk/issues/new".into()
 	}
 
 	fn copyright_start_year() -> i32 {
@@ -86,7 +87,7 @@ impl SubstrateCli for RelayChainCli {
 	}
 
 	fn support_url() -> String {
-		"https://github.com/paritytech/cumulus/issues/new".into()
+		"https://github.com/paritytech/polkadot-sdk/issues/new".into()
 	}
 
 	fn copyright_start_year() -> i32 {
@@ -183,7 +184,7 @@ pub fn run() -> Result<()> {
 			match cmd {
 				BenchmarkCmd::Pallet(cmd) =>
 					if cfg!(feature = "runtime-benchmarks") {
-						runner.sync_run(|config| cmd.run::<Block, ()>(config))
+						runner.sync_run(|config| cmd.run::<Block, ReclaimHostFunctions>(config))
 					} else {
 						Err("Benchmarking wasn't enabled when building the node. \
 					You can enable it with `--features runtime-benchmarks`."

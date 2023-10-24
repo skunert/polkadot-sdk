@@ -35,11 +35,14 @@ xcm = { package = "staging-xcm", path = "../../../polkadot/xcm", default-feature
 cumulus-pallet-parachain-system-proc-macro = { path = "proc-macro", default-features = false }
 cumulus-primitives-core = { path = "../../primitives/core", default-features = false }
 cumulus-primitives-parachain-inherent = { path = "../../primitives/parachain-inherent", default-features = false }
+cumulus-primitives-pov-reclaim = { path = "../../primitives/pov-reclaim", default-features = false }
 
 [dev-dependencies]
 assert_matches = "1.5"
 hex-literal = "0.4.1"
 lazy_static = "1.4"
+trie-standardmap = "0.16.0"
+rand = "0.8.5"
 
 # Substrate
 sc-client-api = { path = "../../../substrate/client/api" }
@@ -58,6 +61,7 @@ std = [
 	"cumulus-pallet-parachain-system-proc-macro/std",
 	"cumulus-primitives-core/std",
 	"cumulus-primitives-parachain-inherent/std",
+	"cumulus-primitives-pov-reclaim/std",
 	"environmental/std",
 	"frame-support/std",
 	"frame-system/std",

@@ -113,7 +113,7 @@ pub type AnnounceBlockFn = Arc<dyn Fn(Hash, Option<Vec<u8>>) + Send + Sync>;
 pub struct RuntimeExecutor;
 
 impl sc_executor::NativeExecutionDispatch for RuntimeExecutor {
-	type ExtendHostFunctions = ();
+	type ExtendHostFunctions = cumulus_client_service::pov_reclaim_host_functions::HostFunctions;
 
 	fn dispatch(method: &str, data: &[u8]) -> Option<Vec<u8>> {
 		cumulus_test_runtime::api::dispatch(method, data)
@@ -181,6 +181,7 @@ impl RecoveryHandle for FailingRecoveryHandle {
 /// be able to perform chain operations.
 pub fn new_partial(
 	config: &mut Configuration,
+	enable_import_proof_record: bool,
 ) -> Result<
 	PartialComponents<
 		Client,
@@ -208,7 +209,12 @@ pub fn new_partial(
 		sc_executor::NativeElseWasmExecutor::<RuntimeExecutor>::new_with_wasm_executor(wasm);
 
 	let (client, backend, keystore_container, task_manager) =
-		sc_service::new_full_parts::<Block, RuntimeApi, _>(config, None, executor)?;
+		sc_service::new_full_parts_record_import::<Block, RuntimeApi, _>(
+			config,
+			None,
+			executor,
+			enable_import_proof_record,
+		)?;
 	let client = Arc::new(client);
 
 	let block_import = ParachainBlockImport::new(client.clone(), backend.clone());
@@ -302,19 +308,21 @@ pub async fn start_node_impl<RB>(
 	rpc_ext_builder: RB,
 	consensus: Consensus,
 	collator_options: CollatorOptions,
+	proof_recording_during_import: bool,
 ) -> sc_service::error::Result<(
 	TaskManager,
 	Arc<Client>,
 	Arc<NetworkService<Block, H256>>,
 	RpcHandlers,
 	TransactionPool,
+	Arc<Backend>,
 )>
 where
 	RB: Fn(Arc<Client>) -> Result<jsonrpsee::RpcModule<()>, sc_service::Error> + Send + 'static,
 {
 	let mut parachain_config = prepare_node_config(parachain_config);
 
-	let params = new_partial(&mut parachain_config)?;
+	let params = new_partial(&mut parachain_config, proof_recording_during_import)?;
 
 	let transaction_pool = params.transaction_pool.clone();
 	let mut task_manager = params.task_manager;
@@ -470,7 +478,7 @@ where
 
 	start_network.start_network();
 
-	Ok((task_manager, client, network, rpc_handlers, transaction_pool))
+	Ok((task_manager, client, network, rpc_handlers, transaction_pool, backend))
 }
 
 /// A Cumulus test node instance used for testing.
@@ -488,6 +496,8 @@ pub struct TestNode {
 	pub rpc_handlers: RpcHandlers,
 	/// Node's transaction pool
 	pub transaction_pool: TransactionPool,
+	/// Node's backend
+	pub backend: Arc<Backend>,
 }
 
 #[allow(missing_docs)]
@@ -513,6 +523,7 @@ pub struct TestNodeBuilder {
 	consensus: Consensus,
 	relay_chain_mode: RelayChainMode,
 	endowed_accounts: Vec<AccountId>,
+	record_proof_during_import: bool,
 }
 
 impl TestNodeBuilder {
@@ -537,6 +548,7 @@ impl TestNodeBuilder {
 			consensus: Consensus::RelayChain,
 			endowed_accounts: Default::default(),
 			relay_chain_mode: RelayChainMode::Embedded,
+			record_proof_during_import: true,
 		}
 	}
 
@@ -649,6 +661,12 @@ impl TestNodeBuilder {
 		self
 	}
 
+	/// Record proofs during import.
+	pub fn import_proof_recording(mut self, should_record_proof: bool) -> TestNodeBuilder {
+		self.record_proof_during_import = should_record_proof;
+		self
+	}
+
 	/// Build the [`TestNode`].
 	pub async fn build(self) -> TestNode {
 		let parachain_config = node_config(
@@ -677,24 +695,26 @@ impl TestNodeBuilder {
 			format!("{} (relay chain)", relay_chain_config.network.node_name);
 
 		let multiaddr = parachain_config.network.listen_addresses[0].clone();
-		let (task_manager, client, network, rpc_handlers, transaction_pool) = start_node_impl(
-			parachain_config,
-			self.collator_key,
-			relay_chain_config,
-			self.para_id,
-			self.wrap_announce_block,
-			false,
-			|_| Ok(jsonrpsee::RpcModule::new(())),
-			self.consensus,
-			collator_options,
-		)
-		.await
-		.expect("could not create Cumulus test service");
+		let (task_manager, client, network, rpc_handlers, transaction_pool, backend) =
+			start_node_impl(
+				parachain_config,
+				self.collator_key,
+				relay_chain_config,
+				self.para_id,
+				self.wrap_announce_block,
+				false,
+				|_| Ok(jsonrpsee::RpcModule::new(())),
+				self.consensus,
+				collator_options,
+				self.record_proof_during_import,
+			)
+			.await
+			.expect("could not create Cumulus test service");
 
 		let peer_id = network.local_peer_id();
 		let addr = MultiaddrWithPeerId { multiaddr, peer_id };
 
-		TestNode { task_manager, client, network, addr, rpc_handlers, transaction_pool }
+		TestNode { task_manager, client, network, addr, rpc_handlers, transaction_pool, backend }
 	}
 }
 

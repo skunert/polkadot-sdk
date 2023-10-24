@@ -19,6 +19,7 @@ use crate::{
 	cli::{Cli, RelayChainCli, Subcommand},
 	service::{new_partial, Block},
 };
+use cumulus_client_service::pov_reclaim_host_functions::HostFunctions as ReclaimHostFunctions;
 use cumulus_primitives_core::ParaId;
 use frame_benchmarking_cli::{BenchmarkCmd, SUBSTRATE_REFERENCE_HARDWARE};
 use log::info;
@@ -332,7 +333,7 @@ impl SubstrateCli for Cli {
 	}
 
 	fn support_url() -> String {
-		"https://github.com/paritytech/cumulus/issues/new".into()
+		"https://github.com/paritytech/polkadot-sdk/issues/new".into()
 	}
 
 	fn copyright_start_year() -> i32 {
@@ -368,7 +369,7 @@ impl SubstrateCli for RelayChainCli {
 	}
 
 	fn support_url() -> String {
-		"https://github.com/paritytech/cumulus/issues/new".into()
+		"https://github.com/paritytech/polkadot-sdk/issues/new".into()
 	}
 
 	fn copyright_start_year() -> i32 {
@@ -733,7 +734,7 @@ pub fn run() -> Result<()> {
 			match cmd {
 				BenchmarkCmd::Pallet(cmd) =>
 					if cfg!(feature = "runtime-benchmarks") {
-						runner.sync_run(|config| cmd.run::<Block, ()>(config))
+						runner.sync_run(|config| cmd.run::<Block, ReclaimHostFunctions>(config))
 					} else {
 						Err("Benchmarking wasn't enabled when building the node. \
 				You can enable it with `--features runtime-benchmarks`."
@@ -836,21 +837,21 @@ pub fn run() -> Result<()> {
 				info!("Is collating: {}", if config.role.is_authority() { "yes" } else { "no" });
 
 				match config.chain_spec.runtime() {
-					Runtime::AssetHubPolkadot => crate::service::start_generic_aura_node::<
+					Runtime::AssetHubPolkadot => crate::service::start_asset_hub_node::<
 						asset_hub_polkadot_runtime::RuntimeApi,
 						AssetHubPolkadotAuraId,
 					>(config, polkadot_config, collator_options, id, hwbench)
 					.await
 					.map(|r| r.0)
 					.map_err(Into::into),
-					Runtime::AssetHubKusama => crate::service::start_generic_aura_node::<
+					Runtime::AssetHubKusama => crate::service::start_asset_hub_node::<
 						asset_hub_kusama_runtime::RuntimeApi,
 						AuraId,
 					>(config, polkadot_config, collator_options, id, hwbench)
 					.await
 					.map(|r| r.0)
 					.map_err(Into::into),
-					Runtime::AssetHubWestend => crate::service::start_generic_aura_node::<
+					Runtime::AssetHubWestend => crate::service::start_asset_hub_node::<
 						asset_hub_westend_runtime::RuntimeApi,
 						AuraId,
 					>(config, polkadot_config, collator_options, id, hwbench)
@@ -876,12 +877,17 @@ pub fn run() -> Result<()> {
 						.await
 						.map(|r| r.0)
 						.map_err(Into::into),
-					Runtime::Seedling => crate::service::start_shell_node::<
-						seedling_runtime::RuntimeApi,
-					>(config, polkadot_config, collator_options, id, hwbench)
-					.await
-					.map(|r| r.0)
-					.map_err(Into::into),
+					Runtime::Seedling =>
+						crate::service::start_shell_node::<seedling_runtime::RuntimeApi>(
+							config,
+							polkadot_config,
+							collator_options,
+							id,
+							hwbench
+						)
+						.await
+						.map(|r| r.0)
+						.map_err(Into::into),
 					Runtime::ContractsRococo => crate::service::start_contracts_rococo_node(
 						config,
 						polkadot_config,
@@ -949,13 +955,10 @@ pub fn run() -> Result<()> {
 						.map(|r| r.0)
 						.map_err(Into::into),
 					Runtime::Glutton =>
-						crate::service::start_shell_node::<glutton_runtime::RuntimeApi>(
-							config,
-							polkadot_config,
-							collator_options,
-							id,
-							hwbench,
-						)
+						crate::service::start_basic_lookahead_node::<
+							glutton_runtime::RuntimeApi,
+							AuraId,
+						>(config, polkadot_config, collator_options, id, hwbench)
 						.await
 						.map(|r| r.0)
 						.map_err(Into::into),
