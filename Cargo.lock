@@ -3497,6 +3497,7 @@ dependencies = [
  "rand 0.8.5",
  "sc-client-api",
  "scale-info",
+ "sp-api",
  "sp-core",
  "sp-externalities",
  "sp-inherents",
@@ -10974,6 +10975,7 @@ name = "parachains-common"
 version = "1.0.0"
 dependencies = [
  "cumulus-primitives-core",
+ "cumulus-primitives-pov-reclaim",
  "cumulus-primitives-utility",
  "frame-support",
  "frame-system",
