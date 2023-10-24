@@ -96,14 +96,17 @@ where
 	pub fn do_pre_dispatch(
 		info: &DispatchInfoOf<T::RuntimeCall>,
 		len: usize,
-	) -> Result<(), TransactionValidityError> {
+	) -> Result<u32, TransactionValidityError> {
 		let next_len = Self::check_block_length(info, len)?;
 		let next_weight = Self::check_block_weight(info)?;
 		Self::check_extrinsic_weight(info)?;
 
 		crate::AllExtrinsicsLen::<T>::put(next_len);
 		crate::BlockWeight::<T>::put(next_weight);
-		Ok(())
+		let pre_dispatch_proof_size =
+			cumulus_primitives_pov_reclaim::pov_reclaim_host_functions::current_storage_proof_size(
+			);
+		Ok(pre_dispatch_proof_size)
 	}
 
 	/// Do the validate checks. This can be applied to both signed and unsigned.
@@ -176,7 +179,7 @@ where
 	type AccountId = T::AccountId;
 	type Call = T::RuntimeCall;
 	type AdditionalSigned = ();
-	type Pre = ();
+	type Pre = u32;
 	const IDENTIFIER: &'static str = "CheckWeight";
 
 	fn additional_signed(&self) -> sp_std::result::Result<(), TransactionValidityError> {
@@ -189,8 +192,10 @@ where
 		_call: &Self::Call,
 		info: &DispatchInfoOf<Self::Call>,
 		len: usize,
-	) -> Result<(), TransactionValidityError> {
-		Self::do_pre_dispatch(info, len)
+	) -> Result<u32, TransactionValidityError> {
+		let result = Self::do_pre_dispatch(info, len)?;
+		log::info!(target: "skunert", "pre_dispatch: {result}");
+		Ok(result)
 	}
 
 	fn validate(
@@ -208,7 +213,8 @@ where
 		info: &DispatchInfoOf<Self::Call>,
 		len: usize,
 	) -> Result<(), TransactionValidityError> {
-		Self::do_pre_dispatch(info, len)
+		Self::do_pre_dispatch(info, len)?;
+		Ok(())
 	}
 
 	fn validate_unsigned(
@@ -220,15 +226,26 @@ where
 	}
 
 	fn post_dispatch(
-		_pre: Option<Self::Pre>,
+		pre: Option<Self::Pre>,
 		info: &DispatchInfoOf<Self::Call>,
 		post_info: &PostDispatchInfoOf<Self::Call>,
 		_len: usize,
 		_result: &DispatchResult,
 	) -> Result<(), TransactionValidityError> {
-		let unspent = post_info.calc_unspent(info);
+		let mut unspent = post_info.calc_unspent(info);
+		if let Some(pre_dispatch_proof_size) = pre {
+			let post_dispatch_proof_size =
+			cumulus_primitives_pov_reclaim::pov_reclaim_host_functions::current_storage_proof_size(
+			);
+			let benchmarked_weight = info.weight.proof_size();
+			let consumed_weight = post_dispatch_proof_size.saturating_sub(pre_dispatch_proof_size);
+			let reclaimable = benchmarked_weight.saturating_sub(consumed_weight as u64);
+			log::info!(target: "skunert","post_dispatch: Got benchmarked_storage_size: {benchmarked_weight}, consumed_weight: {consumed_weight}, reclaimable: {reclaimable}");
+			unspent = unspent.set_proof_size(reclaimable as u64);
+		}
 		log::info!(
-			"Unspent weight: ref_time: {}, proof_size: {}",
+			target: "skunert",
+			"post_dispatch: Unspent weight: ref_time: {}, proof_size: {}",
 			unspent.ref_time(),
 			unspent.proof_size()
 		);

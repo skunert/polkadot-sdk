@@ -16,23 +16,12 @@
 //! Auxiliary struct/enums for parachain runtimes.
 //! Taken from polkadot/runtime/common (at a21cd64) and adapted for parachains.
 
-use codec::{Decode, Encode};
-use frame_support::{
-	dispatch::{DispatchInfo, PostDispatchInfo},
-	pallet_prelude::Weight,
-	traits::{
-		fungibles::{self, Balanced, Credit},
-		Contains, ContainsPair, Currency, Get, Imbalance, OnUnbalanced,
-	},
+use frame_support::traits::{
+	fungibles::{self, Balanced, Credit},
+	Contains, ContainsPair, Currency, Get, Imbalance, OnUnbalanced,
 };
-use frame_system::Config;
 use pallet_asset_tx_payment::HandleCredit;
-use scale_info::TypeInfo;
-use sp_runtime::{
-	traits::{DispatchInfoOf, Dispatchable, PostDispatchInfoOf, Zero},
-	transaction_validity::TransactionValidityError,
-	DispatchResult,
-};
+use sp_runtime::traits::Zero;
 use sp_std::marker::PhantomData;
 use xcm::latest::{AssetId, Fungibility::Fungible, MultiAsset, MultiLocation};
 
@@ -287,77 +276,5 @@ mod tests {
 			AssetsFrom::<SomeSiblingParachain>::contains(&asset, &SomeSiblingParachain::get()),
 			"AssetsFrom should allow assets from any of its interior locations"
 		);
-	}
-}
-
-#[derive(Encode, Decode, Clone, Eq, PartialEq, Default, TypeInfo)]
-#[scale_info(skip_type_params(T))]
-pub struct ClawbackExtension<T: Config + Send + Sync>(sp_std::marker::PhantomData<T>);
-
-impl<T: Config + Send + Sync> core::fmt::Debug for ClawbackExtension<T> {
-	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
-		f.write_str("jap");
-		Ok(())
-	}
-}
-
-impl<T: Config + Send + Sync> ClawbackExtension<T> where
-	T::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>
-{
-}
-
-impl<T: Config + Send + Sync> sp_runtime::traits::SignedExtension for ClawbackExtension<T>
-where
-	T::RuntimeCall: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
-{
-	const IDENTIFIER: &'static str = "Clawback";
-
-	type AccountId = T::AccountId;
-	type Call = T::RuntimeCall;
-	type AdditionalSigned = ();
-	type Pre = u32;
-
-	fn additional_signed(
-		&self,
-	) -> Result<Self::AdditionalSigned, sp_runtime::transaction_validity::TransactionValidityError>
-	{
-		Ok(())
-	}
-
-	fn pre_dispatch(
-		self,
-		who: &Self::AccountId,
-		call: &Self::Call,
-		info: &sp_runtime::traits::DispatchInfoOf<Self::Call>,
-		len: usize,
-	) -> Result<Self::Pre, sp_runtime::transaction_validity::TransactionValidityError> {
-		let proof_size =
-			cumulus_primitives_pov_reclaim::pov_reclaim_host_functions::current_storage_proof_size(
-			);
-		log::info!(target: "skunert","pre_dispatch: Got proof size: {}", proof_size);
-		Ok(proof_size)
-	}
-
-	fn post_dispatch(
-		pre: Option<Self::Pre>,
-		info: &DispatchInfoOf<Self::Call>,
-		_post_info: &PostDispatchInfoOf<Self::Call>,
-		_len: usize,
-		_result: &DispatchResult,
-	) -> Result<(), TransactionValidityError> {
-		if let Some(pre_dispatch_proof_size) = pre {
-			let post_dispatch_proof_size =
-			cumulus_primitives_pov_reclaim::pov_reclaim_host_functions::current_storage_proof_size(
-			);
-			let benchmarked_weight = info.weight.proof_size();
-			let consumed_weight = post_dispatch_proof_size - pre_dispatch_proof_size;
-			let reclaimable = benchmarked_weight.saturating_sub(consumed_weight as u64);
-			let reclaimable_weight = Weight::from_parts(0, reclaimable);
-			log::info!(target: "skunert","post_dispatch: Got benchmarked_weight: {benchmarked_weight}, consumed_weight: {consumed_weight}, reclaimable: {reclaimable}");
-			frame_system::BlockWeight::<T>::mutate(|current| {
-				current.reduce(reclaimable_weight, info.class)
-			});
-		}
-		Ok(())
 	}
 }

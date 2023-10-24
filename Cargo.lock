@@ -5419,6 +5419,7 @@ version = "4.0.0-dev"
 dependencies = [
  "cfg-if",
  "criterion 0.4.0",
+ "cumulus-primitives-pov-reclaim",
  "frame-support",
  "log",
  "parity-scale-codec",
