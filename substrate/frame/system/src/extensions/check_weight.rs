@@ -227,6 +227,11 @@ where
 		_result: &DispatchResult,
 	) -> Result<(), TransactionValidityError> {
 		let unspent = post_info.calc_unspent(info);
+		log::info!(
+			"Unspent weight: ref_time: {}, proof_size: {}",
+			unspent.ref_time(),
+			unspent.proof_size()
+		);
 		if unspent.any_gt(Weight::zero()) {
 			crate::BlockWeight::<T>::mutate(|current_weight| {
 				current_weight.reduce(unspent, info.class);

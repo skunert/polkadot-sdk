@@ -98,6 +98,7 @@ where
 	<B::Extrinsic as Extrinsic>::Call: IsSubType<crate::Call<PSC>>,
 {
 	sp_api::init_runtime_logger();
+	log::info!("validate_block");
 	let block_data = codec::decode_from_bytes::<ParachainBlockData<B>>(block_data)
 		.expect("Invalid parachain block data");
 

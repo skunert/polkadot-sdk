@@ -314,7 +314,7 @@ where
 	type AccountId = T::AccountId;
 	type Call = T::RuntimeCall;
 	type AdditionalSigned = ();
-	type Pre = ();
+	type Pre = u32;
 
 	fn additional_signed(
 		&self,
@@ -330,26 +330,29 @@ where
 		info: &sp_runtime::traits::DispatchInfoOf<Self::Call>,
 		len: usize,
 	) -> Result<Self::Pre, sp_runtime::transaction_validity::TransactionValidityError> {
-		log::info!(target: "skunert", "Calling pre dispatch of my extension");
 		let proof_size =
 			cumulus_primitives_pov_reclaim::pov_reclaim_host_functions::current_storage_proof_size(
 			);
-		log::info!(target: "skunert","Got proof size: {}", proof_size);
-		Ok(())
+		log::info!(target: "skunert","pre_dispatch: Got proof size: {}", proof_size);
+		Ok(proof_size)
 	}
 
 	fn post_dispatch(
-		_pre: Option<Self::Pre>,
-		_info: &DispatchInfoOf<Self::Call>,
+		pre: Option<Self::Pre>,
+		info: &DispatchInfoOf<Self::Call>,
 		_post_info: &PostDispatchInfoOf<Self::Call>,
 		_len: usize,
 		_result: &DispatchResult,
 	) -> Result<(), TransactionValidityError> {
-		log::info!(target: "skunert", "Calling post dispatch of my extension");
-		let proof_size =
+		if let Some(pre_dispatch_proof_size) = pre {
+			let post_dispatch_proof_size =
 			cumulus_primitives_pov_reclaim::pov_reclaim_host_functions::current_storage_proof_size(
 			);
-		log::info!(target: "skunert","Got proof size: {}", proof_size);
+			let benchmarked_weight = info.weight.proof_size();
+			let consumed_weight = post_dispatch_proof_size - pre_dispatch_proof_size;
+			let reclaimable = benchmarked_weight.saturating_sub(consumed_weight as u64);
+			log::info!(target: "skunert","post_dispatch: Got benchmarked_weight: {benchmarked_weight}, consumed_weight: {consumed_weight}, reclaimable: {reclaimable}");
+		}
 		Ok(())
 	}
 }
