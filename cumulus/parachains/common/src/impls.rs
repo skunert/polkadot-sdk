@@ -19,6 +19,7 @@
 use codec::{Decode, Encode};
 use frame_support::{
 	dispatch::{DispatchInfo, PostDispatchInfo},
+	pallet_prelude::Weight,
 	traits::{
 		fungibles::{self, Balanced, Credit},
 		Contains, ContainsPair, Currency, Get, Imbalance, OnUnbalanced,
@@ -351,7 +352,11 @@ where
 			let benchmarked_weight = info.weight.proof_size();
 			let consumed_weight = post_dispatch_proof_size - pre_dispatch_proof_size;
 			let reclaimable = benchmarked_weight.saturating_sub(consumed_weight as u64);
+			let reclaimable_weight = Weight::from_parts(0, reclaimable);
 			log::info!(target: "skunert","post_dispatch: Got benchmarked_weight: {benchmarked_weight}, consumed_weight: {consumed_weight}, reclaimable: {reclaimable}");
+			frame_system::BlockWeight::<T>::mutate(|current| {
+				current.reduce(reclaimable_weight, info.class)
+			});
 		}
 		Ok(())
 	}
