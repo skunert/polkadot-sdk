@@ -2438,6 +2438,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 				if let Ok(()) =
 					self.storage.state_db.pin(&hash, hdr.number.saturated_into::<u64>(), hint)
 				{
+					log::info!(target: "skunert", "Block {hash:?} was pinned manually via state_at. refcount: {:?}", self.storage.state_db.pinned_count(hash));
 					let root = hdr.state_root;
 					let db_state = DbStateBuilder::<Block>::new(self.storage.clone(), root)
 						.with_optional_cache(
@@ -2519,6 +2520,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 					))
 				},
 			)?;
+			log::info!(target: "skunert", "Block {number} ({hash:?}) was pinned manually via pin_block. refcount: {:?}", self.storage.state_db.pinned_count(hash));
 		} else {
 			return Err(ClientError::UnknownBlock(format!(
 				"Can not pin block with hash `{:?}`. Block not found.",
@@ -2535,7 +2537,7 @@ impl<Block: BlockT> sc_client_api::backend::Backend<Block> for Backend<Block> {
 
 	fn unpin_block(&self, hash: <Block as BlockT>::Hash) {
 		self.storage.state_db.unpin(&hash);
-
+		log::info!(target: "skunert", "Block {hash:?} was unpinned manually via upin_block. refcount: {:?}", self.storage.state_db.pinned_count(hash));
 		if self.blocks_pruning != BlocksPruning::KeepAll {
 			self.blockchain.unpin(hash);
 		}

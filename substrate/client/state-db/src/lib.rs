@@ -345,6 +345,10 @@ impl<BlockHash: Hash, Key: Hash, D: MetaDb> StateDbSync<BlockHash, Key, D> {
 		}
 	}
 
+	fn pinned_ref_count(&self, h: BlockHash) -> Option<u32> {
+		self.pinned.get(&h).cloned()
+	}
+
 	fn canonicalize_block(&mut self, hash: &BlockHash) -> Result<CommitSet<Key>, Error<D::Error>> {
 		// NOTE: it is important that the change to `LAST_CANONICAL` (emit from
 		// `non_canonical.canonicalize`) and the insert of the new pruning journal (emit from
@@ -577,6 +581,10 @@ impl<BlockHash: Hash, Key: Hash, D: MetaDb> StateDb<BlockHash, Key, D> {
 
 	pub fn pruning_mode(&self) -> PruningMode {
 		self.db.read().mode.clone()
+	}
+
+	pub fn pinned_count(&self, h: BlockHash) -> Option<u32> {
+		self.db.read().pinned_ref_count(h)
 	}
 
 	/// Add a new non-canonical block.

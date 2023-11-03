@@ -142,6 +142,7 @@ impl<BlockHash: Hash, Key: Hash, D: MetaDb> DeathRowQueue<BlockHash, Key, D> {
 			},
 			DeathRowQueue::Mem { death_rows, death_index } => {
 				// remove all re-inserted keys from death rows
+				trace!(target: LOG_TARGET, "Death row contains {} elements.", death_rows.len());
 				for k in inserted {
 					if let Some(block) = death_index.remove(&k) {
 						death_rows[(block - base) as usize].deleted.remove(&k);
