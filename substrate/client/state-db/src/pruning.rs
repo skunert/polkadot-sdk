@@ -29,7 +29,7 @@ use crate::{
 	DEFAULT_MAX_BLOCK_CONSTRAINT, LOG_TARGET,
 };
 use codec::{Decode, Encode};
-use log::trace;
+use log::{info, trace};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 pub(crate) const LAST_PRUNED: &[u8] = b"last_pruned";
@@ -142,7 +142,7 @@ impl<BlockHash: Hash, Key: Hash, D: MetaDb> DeathRowQueue<BlockHash, Key, D> {
 			},
 			DeathRowQueue::Mem { death_rows, death_index } => {
 				// remove all re-inserted keys from death rows
-				trace!(target: LOG_TARGET, "Death row contains {} elements.", death_rows.len());
+				info!(target: LOG_TARGET, "death_index: {}, death_rows: {}", death_index.len(), death_rows.len());
 				for k in inserted {
 					if let Some(block) = death_index.remove(&k) {
 						death_rows[(block - base) as usize].deleted.remove(&k);
