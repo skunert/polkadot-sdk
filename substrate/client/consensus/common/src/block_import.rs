@@ -23,7 +23,7 @@ use sp_runtime::{
 	traits::{Block as BlockT, HashingFor, Header as HeaderT, NumberFor},
 	DigestItem, Justification, Justifications,
 };
-use std::{any::Any, borrow::Cow, collections::HashMap, sync::Arc};
+use std::{any::Any, borrow::Cow, collections::HashMap, path::Path, sync::Arc};
 
 use sp_consensus::{BlockOrigin, Error};
 
@@ -126,13 +126,19 @@ pub enum StorageChanges<Block: BlockT> {
 	Import(ImportedState<Block>),
 }
 
+#[derive(Clone, Eq, PartialEq)]
+pub enum ImportedStateMode {
+	InMemory(sp_state_machine::KeyValueStates),
+	Filesystem(Box<Path>),
+}
+
 /// Imported state data. A vector of key-value pairs that should form a trie.
 #[derive(PartialEq, Eq, Clone)]
 pub struct ImportedState<B: BlockT> {
 	/// Target block hash.
 	pub block: B::Hash,
 	/// State keys and values.
-	pub state: sp_state_machine::KeyValueStates,
+	pub state: ImportedStateMode,
 }
 
 impl<B: BlockT> std::fmt::Debug for ImportedState<B> {

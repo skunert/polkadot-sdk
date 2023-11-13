@@ -41,7 +41,8 @@ use sc_client_api::{
 	ProofProvider, UsageProvider,
 };
 use sc_consensus::{
-	BlockCheckParams, BlockImportParams, ForkChoiceStrategy, ImportResult, StateAction,
+	block_import::ImportedStateMode, BlockCheckParams, BlockImportParams, ForkChoiceStrategy,
+	ImportResult, StateAction,
 };
 use sc_executor::RuntimeVersion;
 use sc_telemetry::{telemetry, TelemetryHandle, SUBSTRATE_INFO};
@@ -639,32 +640,37 @@ where
 					},
 					sc_consensus::StorageChanges::Import(changes) => {
 						let mut storage = sp_storage::Storage::default();
-						for state in changes.state.0.into_iter() {
-							if state.parent_storage_keys.is_empty() && state.state_root.is_empty() {
-								for (key, value) in state.key_values.into_iter() {
-									storage.top.insert(key, value);
-								}
-							} else {
-								for parent_storage in state.parent_storage_keys {
-									let storage_key = PrefixedStorageKey::new_ref(&parent_storage);
-									let storage_key =
-										match ChildType::from_prefixed_key(storage_key) {
-											Some((ChildType::ParentKeyId, storage_key)) =>
-												storage_key,
-											None =>
-												return Err(Error::Backend(
-													"Invalid child storage key.".to_string(),
-												)),
-										};
-									let entry = storage
-										.children_default
-										.entry(storage_key.to_vec())
-										.or_insert_with(|| StorageChild {
-											data: Default::default(),
-											child_info: ChildInfo::new_default(storage_key),
-										});
-									for (key, value) in state.key_values.iter() {
-										entry.data.insert(key.clone(), value.clone());
+						if let ImportedStateMode::InMemory(in_memory_state) = changes.state {
+							for state in in_memory_state.0.into_iter() {
+								if state.parent_storage_keys.is_empty() &&
+									state.state_root.is_empty()
+								{
+									for (key, value) in state.key_values.into_iter() {
+										storage.top.insert(key, value);
+									}
+								} else {
+									for parent_storage in state.parent_storage_keys {
+										let storage_key =
+											PrefixedStorageKey::new_ref(&parent_storage);
+										let storage_key =
+											match ChildType::from_prefixed_key(storage_key) {
+												Some((ChildType::ParentKeyId, storage_key)) =>
+													storage_key,
+												None =>
+													return Err(Error::Backend(
+														"Invalid child storage key.".to_string(),
+													)),
+											};
+										let entry = storage
+											.children_default
+											.entry(storage_key.to_vec())
+											.or_insert_with(|| StorageChild {
+												data: Default::default(),
+												child_info: ChildInfo::new_default(storage_key),
+											});
+										for (key, value) in state.key_values.iter() {
+											entry.data.insert(key.clone(), value.clone());
+										}
 									}
 								}
 							}

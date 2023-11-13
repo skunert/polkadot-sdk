@@ -226,7 +226,9 @@ where
 				self.target_header.clone(),
 				ImportedState {
 					block: self.target_block,
-					state: std::mem::take(&mut self.state).into(),
+					state: sc_consensus::block_import::ImportedStateMode::InMemory(
+						std::mem::take(&mut self.state).into(),
+					),
 				},
 				self.target_body.clone(),
 				self.target_justifications.clone(),
