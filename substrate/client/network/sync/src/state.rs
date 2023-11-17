@@ -25,6 +25,7 @@ use crate::{
 use codec::{Decode, Encode};
 use log::debug;
 use sc_client_api::{CompactProof, ProofProvider};
+use sc_client_db::DatabaseSource;
 use sc_consensus::ImportedState;
 use smallvec::SmallVec;
 use sp_core::storage::well_known_keys;
@@ -32,7 +33,7 @@ use sp_runtime::{
 	traits::{Block as BlockT, Header, NumberFor},
 	Justifications,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 /// State sync state machine. Accumulates partial state data until it
 /// is ready to be imported.
@@ -43,6 +44,7 @@ pub struct StateSync<B: BlockT, Client> {
 	target_body: Option<Vec<B::Extrinsic>>,
 	target_justifications: Option<Justifications>,
 	last_key: SmallVec<[Vec<u8>; 2]>,
+	// In-memory state HashMap<state_root, ((key, value), storage_path_parent)>
 	state: HashMap<Vec<u8>, (Vec<(Vec<u8>, Vec<u8>)>, Vec<Vec<u8>>)>,
 	complete: bool,
 	client: Arc<Client>,
@@ -98,6 +100,7 @@ where
 			debug!(target: "sync", "Missing proof");
 			return ImportResult::BadResponse
 		}
+
 		let complete = if !self.skip_proof {
 			debug!(target: "sync", "Importing state from {} trie nodes", response.proof.len());
 			let proof_size = response.proof.len() as u64;

@@ -234,7 +234,7 @@ where
 
 			trace!(
 				target: LOG_TARGET,
-				"StateResponse contains {} keys, {}, proof nodes, from {:?} to {:?}",
+				"StateResponse contains {} keys, {} proof nodes, from {:?} to {:?}",
 				response.entries.len(),
 				response.proof.len(),
 				response.entries.get(0).and_then(|top| top

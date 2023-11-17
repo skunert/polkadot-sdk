@@ -15772,6 +15772,7 @@ dependencies = [
  "libp2p",
  "log",
  "mockall",
+ "parity-db",
  "parity-scale-codec",
  "prost",
  "prost-build",

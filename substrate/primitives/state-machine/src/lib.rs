@@ -492,6 +492,8 @@ mod execution {
 		}
 
 		/// Update last keys accessed from this state.
+		///
+		/// Returns `true` if `last` was updated successfully.
 		pub fn update_last_key(
 			&self,
 			stopped_at: usize,
