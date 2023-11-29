@@ -23,9 +23,9 @@ use crate::{
 	types::StateDownloadProgress,
 };
 use codec::{Decode, Encode};
+use kvdb_rocksdb::Database;
 use log::debug;
 use sc_client_api::{CompactProof, ProofProvider};
-use sc_client_db::DatabaseSource;
 use sc_consensus::ImportedState;
 use smallvec::SmallVec;
 use sp_core::storage::well_known_keys;
@@ -48,6 +48,7 @@ pub struct StateSync<B: BlockT, Client> {
 	state: HashMap<Vec<u8>, (Vec<(Vec<u8>, Vec<u8>)>, Vec<Vec<u8>>)>,
 	complete: bool,
 	client: Arc<Client>,
+	sync_db: Database,
 	imported_bytes: u64,
 	skip_proof: bool,
 }
@@ -75,6 +76,10 @@ where
 		target_justifications: Option<Justifications>,
 		skip_proof: bool,
 	) -> Self {
+		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(1);
+		db_config.create_if_missing = true;
+		let path = std::path::Path::new("/tmp/state");
+		let db = kvdb_rocksdb::Database::open(&db_config, path).unwrap();
 		Self {
 			client,
 			target_block: target_header.hash(),
@@ -85,6 +90,7 @@ where
 			last_key: SmallVec::default(),
 			state: HashMap::default(),
 			complete: false,
+			sync_db: db,
 			imported_bytes: 0,
 			skip_proof,
 		}
@@ -102,126 +108,14 @@ where
 		}
 
 		let complete = if !self.skip_proof {
-			debug!(target: "sync", "Importing state from {} trie nodes", response.proof.len());
-			let proof_size = response.proof.len() as u64;
-			let proof = match CompactProof::decode(&mut response.proof.as_ref()) {
-				Ok(proof) => proof,
-				Err(e) => {
-					debug!(target: "sync", "Error decoding proof: {:?}", e);
-					return ImportResult::BadResponse
-				},
-			};
-			let (values, completed) = match self.client.verify_range_proof(
-				self.target_root,
-				proof,
-				self.last_key.as_slice(),
-			) {
-				Err(e) => {
-					debug!(
-						target: "sync",
-						"StateResponse failed proof verification: {}",
-						e,
-					);
-					return ImportResult::BadResponse
-				},
-				Ok(values) => values,
-			};
-			debug!(target: "sync", "Imported with {} keys", values.len());
-
-			let complete = completed == 0;
-			if !complete && !values.update_last_key(completed, &mut self.last_key) {
-				debug!(target: "sync", "Error updating key cursor, depth: {}", completed);
-			};
-
-			for values in values.0 {
-				let key_values = if values.state_root.is_empty() {
-					// Read child trie roots.
-					values
-						.key_values
-						.into_iter()
-						.filter(|key_value| {
-							if well_known_keys::is_child_storage_key(key_value.0.as_slice()) {
-								self.state
-									.entry(key_value.1.clone())
-									.or_default()
-									.1
-									.push(key_value.0.clone());
-								false
-							} else {
-								true
-							}
-						})
-						.collect()
-				} else {
-					values.key_values
-				};
-				let entry = self.state.entry(values.state_root).or_default();
-				if entry.0.len() > 0 && entry.1.len() > 1 {
-					// Already imported child_trie with same root.
-					// Warning this will not work with parallel download.
-				} else if entry.0.is_empty() {
-					for (key, _value) in key_values.iter() {
-						self.imported_bytes += key.len() as u64;
-					}
-
-					entry.0 = key_values;
-				} else {
-					for (key, value) in key_values {
-						self.imported_bytes += key.len() as u64;
-						entry.0.push((key, value))
-					}
-				}
+			match self.process_response_with_proof(&response) {
+				Ok(value) => value,
+				Err(err) => return err,
 			}
-			self.imported_bytes += proof_size;
-			complete
 		} else {
-			let mut complete = true;
-			// if the trie is a child trie and one of its parent trie is empty,
-			// the parent cursor stays valid.
-			// Empty parent trie content only happens when all the response content
-			// is part of a single child trie.
-			if self.last_key.len() == 2 && response.entries[0].entries.is_empty() {
-				// Do not remove the parent trie position.
-				self.last_key.pop();
-			} else {
-				self.last_key.clear();
-			}
-			for state in response.entries {
-				debug!(
-					target: "sync",
-					"Importing state from {:?} to {:?}",
-					state.entries.last().map(|e| sp_core::hexdisplay::HexDisplay::from(&e.key)),
-					state.entries.first().map(|e| sp_core::hexdisplay::HexDisplay::from(&e.key)),
-				);
-
-				if !state.complete {
-					if let Some(e) = state.entries.last() {
-						self.last_key.push(e.key.clone());
-					}
-					complete = false;
-				}
-				let is_top = state.state_root.is_empty();
-				let entry = self.state.entry(state.state_root).or_default();
-				if entry.0.len() > 0 && entry.1.len() > 1 {
-					// Already imported child trie with same root.
-				} else {
-					let mut child_roots = Vec::new();
-					for StateEntry { key, value } in state.entries {
-						// Skip all child key root (will be recalculated on import).
-						if is_top && well_known_keys::is_child_storage_key(key.as_slice()) {
-							child_roots.push((value, key));
-						} else {
-							self.imported_bytes += key.len() as u64;
-							entry.0.push((key, value))
-						}
-					}
-					for (root, storage_key) in child_roots {
-						self.state.entry(root).or_default().1.push(storage_key);
-					}
-				}
-			}
-			complete
+			self.process_response_no_proof(response)
 		};
+
 		if complete {
 			self.complete = true;
 			ImportResult::Import(
@@ -239,6 +133,131 @@ where
 		} else {
 			ImportResult::Continue
 		}
+	}
+
+	fn process_response_no_proof(&mut self, response: _) -> bool {
+		let mut complete = true;
+		// if the trie is a child trie and one of its parent trie is empty,
+		// the parent cursor stays valid.
+		// Empty parent trie content only happens when all the response content
+		// is part of a single child trie.
+		if self.last_key.len() == 2 && response.entries[0].entries.is_empty() {
+			// Do not remove the parent trie position.
+			self.last_key.pop();
+		} else {
+			self.last_key.clear();
+		}
+		for state in response.entries {
+			debug!(
+				target: "sync",
+				"Importing state from {:?} to {:?}",
+				state.entries.last().map(|e| sp_core::hexdisplay::HexDisplay::from(&e.key)),
+				state.entries.first().map(|e| sp_core::hexdisplay::HexDisplay::from(&e.key)),
+			);
+
+			if !state.complete {
+				if let Some(e) = state.entries.last() {
+					self.last_key.push(e.key.clone());
+				}
+				complete = false;
+			}
+			let is_top = state.state_root.is_empty();
+			let entry = self.state.entry(state.state_root).or_default();
+			if entry.0.len() > 0 && entry.1.len() > 1 {
+				// Already imported child trie with same root.
+			} else {
+				let mut child_roots = Vec::new();
+				for StateEntry { key, value } in state.entries {
+					// Skip all child key root (will be recalculated on import).
+					if is_top && well_known_keys::is_child_storage_key(key.as_slice()) {
+						child_roots.push((value, key));
+					} else {
+						self.imported_bytes += key.len() as u64;
+						entry.0.push((key, value))
+					}
+				}
+				for (root, storage_key) in child_roots {
+					self.state.entry(root).or_default().1.push(storage_key);
+				}
+			}
+		}
+		complete
+	}
+
+	fn process_response_with_proof(&mut self, response: &_) -> Result<bool, ImportResult<B>> {
+		debug!(target: "sync", "Importing state from {} trie nodes", response.proof.len());
+		let transaction = self.sync_db.transaction();
+		let proof_size = response.proof.len() as u64;
+		let proof = match CompactProof::decode(&mut response.proof.as_ref()) {
+			Ok(proof) => proof,
+			Err(e) => {
+				debug!(target: "sync", "Error decoding proof: {:?}", e);
+				return Err(ImportResult::BadResponse)
+			},
+		};
+		let (values, completed) =
+			match self
+				.client
+				.verify_range_proof(self.target_root, proof, self.last_key.as_slice())
+			{
+				Err(e) => {
+					debug!(
+						target: "sync",
+						"StateResponse failed proof verification: {}",
+						e,
+					);
+					return Err(ImportResult::BadResponse)
+				},
+				Ok(values) => values,
+			};
+		debug!(target: "sync", "Imported with {} keys", values.len());
+		let complete = completed == 0;
+		if !complete && !values.update_last_key(completed, &mut self.last_key) {
+			debug!(target: "sync", "Error updating key cursor, depth: {}", completed);
+		};
+
+		for values in values.0 {
+			let key_values = if values.state_root.is_empty() {
+				// Read child trie roots.
+				values
+					.key_values
+					.into_iter()
+					.filter(|key_value| {
+						if well_known_keys::is_child_storage_key(key_value.0.as_slice()) {
+							self.state
+								.entry(key_value.1.clone())
+								.or_default()
+								.1
+								.push(key_value.0.clone());
+							false
+						} else {
+							true
+						}
+					})
+					.collect()
+			} else {
+				values.key_values
+			};
+			let entry = self.state.entry(values.state_root).or_default();
+			if entry.0.len() > 0 && entry.1.len() > 1 {
+				// Already imported child_trie with same root.
+				// Warning this will not work with parallel download.
+			} else if entry.0.is_empty() {
+				for (key, _value) in key_values.iter() {
+					self.imported_bytes += key.len() as u64;
+				}
+
+				entry.0 = key_values;
+			} else {
+				for (key, value) in key_values {
+					self.imported_bytes += key.len() as u64;
+					entry.0.push((key, value))
+				}
+			}
+		}
+
+		self.imported_bytes += proof_size;
+		Ok(complete)
 	}
 
 	/// Produce next state request.

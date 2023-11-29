@@ -45,6 +45,7 @@ sp-consensus = { path = "../../../primitives/consensus/common" }
 sp-core = { path = "../../../primitives/core" }
 sp-consensus-grandpa = { path = "../../../primitives/consensus/grandpa" }
 sp-runtime = { path = "../../../primitives/runtime" }
+kvdb-rocksdb = "0.19.0"
 
 [dev-dependencies]
 tokio = { version = "1.22.0", features = ["macros"] }

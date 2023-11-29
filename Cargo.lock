@@ -15912,6 +15912,7 @@ dependencies = [
  "fork-tree",
  "futures",
  "futures-timer",
+ "kvdb-rocksdb",
  "libp2p",
  "log",
  "mockall",
