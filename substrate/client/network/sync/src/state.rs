@@ -35,6 +35,31 @@ use sp_runtime::{
 };
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
+struct SyncDb {
+	db: Arc<parity_db::Db>,
+}
+
+impl SyncDb {
+	fn new(path: PathBuf) -> Self {
+		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(NUM_COLUMNS);
+		db_config.create_if_missing = true;
+		let options = parity_db::Options::with_columns(&path, NUM_COLUMNS as u8);
+		let db = parity_db::Db::open_or_create(&options).unwrap();
+		Self { db: Arc::new(db) }
+	}
+
+	fn get(&self, key: &[u8]) -> Option<(Vec<(Vec<u8>, Vec<u8>)>, Vec<Vec<u8>>)> {
+		let res = self.db.get(0, key).unwrap();
+		res.map(|v| <(Vec<(Vec<u8>, Vec<u8>)>, Vec<Vec<u8>>) as Decode>::decode(&mut &*v).unwrap())
+	}
+
+	fn put(&self, column: u8, key: &[u8], value: (Vec<(Vec<u8>, Vec<u8>)>, Vec<Vec<u8>>)) {
+		let encoded = value.encode();
+		let changes = vec![(column, key.to_vec(), Some(encoded))];
+		self.db.commit(changes).unwrap();
+	}
+}
+
 /// State sync state machine. Accumulates partial state data until it
 /// is ready to be imported.
 pub struct StateSync<B: BlockT, Client> {
@@ -48,10 +73,12 @@ pub struct StateSync<B: BlockT, Client> {
 	state: HashMap<Vec<u8>, (Vec<(Vec<u8>, Vec<u8>)>, Vec<Vec<u8>>)>,
 	complete: bool,
 	client: Arc<Client>,
-	sync_db: Database,
+	sync_db: Arc<parity_db::Db>,
 	imported_bytes: u64,
 	skip_proof: bool,
 }
+
+const NUM_COLUMNS: u32 = 1;
 
 /// Import state chunk result.
 pub enum ImportResult<B: BlockT> {
@@ -76,10 +103,12 @@ where
 		target_justifications: Option<Justifications>,
 		skip_proof: bool,
 	) -> Self {
-		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(1);
+		let mut db_config = kvdb_rocksdb::DatabaseConfig::with_columns(NUM_COLUMNS);
 		db_config.create_if_missing = true;
 		let path = std::path::Path::new("/tmp/state");
-		let db = kvdb_rocksdb::Database::open(&db_config, path).unwrap();
+
+		let options = parity_db::Options::with_columns(&path, NUM_COLUMNS as u8);
+		let db = parity_db::Db::open_or_create(&options).unwrap();
 		Self {
 			client,
 			target_block: target_header.hash(),
@@ -90,7 +119,7 @@ where
 			last_key: SmallVec::default(),
 			state: HashMap::default(),
 			complete: false,
-			sync_db: db,
+			sync_db: Arc::new(db),
 			imported_bytes: 0,
 			skip_proof,
 		}
@@ -135,7 +164,7 @@ where
 		}
 	}
 
-	fn process_response_no_proof(&mut self, response: _) -> bool {
+	fn process_response_no_proof(&mut self, response: StateResponse) -> bool {
 		let mut complete = true;
 		// if the trie is a child trie and one of its parent trie is empty,
 		// the parent cursor stays valid.
@@ -162,6 +191,7 @@ where
 				complete = false;
 			}
 			let is_top = state.state_root.is_empty();
+			self.sync_db.get(0, &state.state_root);
 			let entry = self.state.entry(state.state_root).or_default();
 			if entry.0.len() > 0 && entry.1.len() > 1 {
 				// Already imported child trie with same root.
@@ -184,9 +214,11 @@ where
 		complete
 	}
 
-	fn process_response_with_proof(&mut self, response: &_) -> Result<bool, ImportResult<B>> {
+	fn process_response_with_proof(
+		&mut self,
+		response: &StateResponse,
+	) -> Result<bool, ImportResult<B>> {
 		debug!(target: "sync", "Importing state from {} trie nodes", response.proof.len());
-		let transaction = self.sync_db.transaction();
 		let proof_size = response.proof.len() as u64;
 		let proof = match CompactProof::decode(&mut response.proof.as_ref()) {
 			Ok(proof) => proof,
@@ -238,6 +270,7 @@ where
 			} else {
 				values.key_values
 			};
+			let entry = self.sync_db.get(0, &values.state_root).unwrap();
 			let entry = self.state.entry(values.state_root).or_default();
 			if entry.0.len() > 0 && entry.1.len() > 1 {
 				// Already imported child_trie with same root.

@@ -34,18 +34,21 @@ tokio = { version = "1.32.0", features = ["time", "macros"] }
 fork-tree = { path = "../../../utils/fork-tree" }
 prometheus-endpoint = { package = "substrate-prometheus-endpoint", path = "../../../utils/prometheus" }
 sc-client-api = { path = "../../api" }
-parity-db = { version = "0.4.8" }
+sc-client-db = { path = "../../db" }
+parity-db = "0.4.8"
 sc-consensus = { path = "../../consensus/common" }
 sc-network = { path = ".." }
 sc-network-common = { path = "../common" }
 sc-utils = { path = "../../utils" }
 sp-arithmetic = { path = "../../../primitives/arithmetic" }
 sp-blockchain = { path = "../../../primitives/blockchain" }
+sp-database = { path = "../../../primitives/database" }
 sp-consensus = { path = "../../../primitives/consensus/common" }
 sp-core = { path = "../../../primitives/core" }
 sp-consensus-grandpa = { path = "../../../primitives/consensus/grandpa" }
 sp-runtime = { path = "../../../primitives/runtime" }
 kvdb-rocksdb = "0.19.0"
+kvdb = "0.13.0"
 
 [dev-dependencies]
 tokio = { version = "1.22.0", features = ["macros"] }
