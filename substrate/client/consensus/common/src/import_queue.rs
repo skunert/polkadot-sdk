@@ -284,7 +284,9 @@ pub(crate) async fn import_single_block_metered<B: BlockT, V: Verifier<B>>(
 			Err(BlockImportError::Other(e))
 		},
 	};
-
+	if block.state.is_some() || BlockOrigin::InitialWarp == block_origin {
+		log::info!(target: "skunert", "Allowing missing parent for block: #{} {}", number, hash);
+	}
 	match import_handler(
 		import_handle
 			.check_block(BlockCheckParams {
@@ -293,7 +295,8 @@ pub(crate) async fn import_single_block_metered<B: BlockT, V: Verifier<B>>(
 				parent_hash,
 				allow_missing_state: block.allow_missing_state,
 				import_existing: block.import_existing,
-				allow_missing_parent: block.state.is_some(),
+				allow_missing_parent: block.state.is_some() ||
+					BlockOrigin::InitialWarp == block_origin,
 			})
 			.await,
 	)? {

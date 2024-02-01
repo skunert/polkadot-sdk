@@ -300,13 +300,28 @@ where
 			.ok_or_else(|| "Empty proof".to_string())?;
 		let (next_set_id, next_authorities) =
 			proof.verify(set_id, authorities, &self.hard_forks).map_err(Box::new)?;
+		let result = proof
+			.proofs
+			.iter()
+			.map(|fragment| {
+				(
+					fragment.header.clone(),
+					(
+						sp_consensus_grandpa::GRANDPA_ENGINE_ID,
+						fragment.justification.clone().encode(),
+					),
+				)
+			})
+			.collect::<Vec<_>>();
 		if proof.is_finished {
 			Ok(VerificationResult::<Block>::Complete(next_set_id, next_authorities, last_header))
 		} else {
+			log::info!(target: "skunert", "Verified batch of proofs, including {} headers and justifications in result.", result.len());
 			Ok(VerificationResult::<Block>::Partial(
 				next_set_id,
 				next_authorities,
 				last_header.hash(),
+				result,
 			))
 		}
 	}

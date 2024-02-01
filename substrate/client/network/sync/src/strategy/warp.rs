@@ -18,6 +18,8 @@
 
 //! Warp syncing strategy. Bootstraps chain by downloading warp proofs and state.
 
+use sc_consensus::IncomingBlock;
+use sp_consensus::BlockOrigin;
 pub use sp_consensus_grandpa::{AuthorityList, SetId};
 
 use crate::{
@@ -35,7 +37,7 @@ use sc_network_common::sync::message::{
 use sp_blockchain::HeaderBackend;
 use sp_runtime::{
 	traits::{Block as BlockT, Header, NumberFor, Zero},
-	Justifications, SaturatedConversion,
+	Justification, Justifications, SaturatedConversion,
 };
 use std::{collections::HashMap, fmt, sync::Arc};
 
@@ -55,7 +57,7 @@ pub struct WarpProofRequest<B: BlockT> {
 /// Proof verification result.
 pub enum VerificationResult<Block: BlockT> {
 	/// Proof is valid, but the target was not reached.
-	Partial(SetId, AuthorityList, Block::Hash),
+	Partial(SetId, AuthorityList, Block::Hash, Vec<(Block::Header, Justification)>),
 	/// Target finality is proved.
 	Complete(SetId, AuthorityList, Block::Header),
 }
@@ -221,6 +223,8 @@ pub enum WarpSyncAction<B: BlockT> {
 	SendWarpProofRequest { peer_id: PeerId, request: WarpProofRequest<B> },
 	/// Send block request to peer. Always implies dropping a stale block request to the same peer.
 	SendBlockRequest { peer_id: PeerId, request: BlockRequest<B> },
+	/// Import block header and justifications during warp sync already.
+	ImportHeaderAndJustification { origin: BlockOrigin, blocks: Vec<IncomingBlock<B>> },
 	/// Disconnect and report peer.
 	DropPeer(BadPeer),
 	/// Warp sync has finished.
@@ -371,12 +375,36 @@ where
 				self.actions
 					.push(WarpSyncAction::DropPeer(BadPeer(*peer_id, rep::BAD_WARP_PROOF)))
 			},
-			Ok(VerificationResult::Partial(new_set_id, new_authorities, new_last_hash)) => {
+			Ok(VerificationResult::Partial(new_set_id, new_authorities, new_last_hash, blocks)) => {
 				log::debug!(target: LOG_TARGET, "Verified partial proof, set_id={:?}", new_set_id);
 				*set_id = new_set_id;
 				*authorities = new_authorities;
 				*last_hash = new_last_hash;
 				self.total_proof_bytes += response.0.len() as u64;
+				let blocks_to_import: Vec<_> = blocks
+					.into_iter()
+					.map(|block| IncomingBlock::<B> {
+						hash: block.0.hash(),
+						header: Some(block.0),
+						body: None,
+						indexed_body: None,
+						justifications: Some(block.1.into()),
+						origin: None,
+						allow_missing_state: true,
+						skip_execution: true,
+						import_existing: false,
+						state: None,
+					})
+					.collect();
+				let numbers: Vec<_> = blocks_to_import
+					.iter()
+					.map(|to_import| to_import.header.clone().expect("").number().clone())
+					.collect();
+				log::info!(target: "skunert", "Adding {} blocks from strategy. Nunmbers: {:?}", blocks_to_import.len(), numbers);
+				self.actions.push(WarpSyncAction::ImportHeaderAndJustification {
+					origin: BlockOrigin::InitialWarp,
+					blocks: blocks_to_import,
+				})
 			},
 			Ok(VerificationResult::Complete(new_set_id, _, header)) => {
 				log::debug!(
@@ -988,7 +1016,7 @@ mod test {
 			.return_const(AuthorityList::default());
 		// Warp proof is partial.
 		provider.expect_verify().return_once(|_proof, set_id, authorities| {
-			Ok(VerificationResult::Partial(set_id, authorities, Hash::random()))
+			Ok(VerificationResult::Partial(set_id, authorities, Hash::random(), Default::default()))
 		});
 		let config = WarpSyncConfig::WithProvider(Arc::new(provider));
 		let mut warp_sync = WarpSync::new(Arc::new(client), config);

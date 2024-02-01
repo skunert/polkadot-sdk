@@ -1421,6 +1421,7 @@ where
 		if let Some(metrics) = &self.metrics {
 			metrics.import_queue_blocks_submitted.inc();
 		}
+		log::info!(target: "skunert", "Importing {} blocks.", blocks.len());
 
 		self.import_queue.import_blocks(origin, blocks);
 	}

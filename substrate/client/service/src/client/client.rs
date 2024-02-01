@@ -619,7 +619,10 @@ where
 		let make_notifications = match origin {
 			BlockOrigin::NetworkBroadcast | BlockOrigin::Own | BlockOrigin::ConsensusBroadcast =>
 				true,
-			BlockOrigin::Genesis | BlockOrigin::NetworkInitialSync | BlockOrigin::File => false,
+			BlockOrigin::Genesis |
+			BlockOrigin::NetworkInitialSync |
+			BlockOrigin::File |
+			BlockOrigin::InitialWarp => false,
 		};
 
 		let storage_changes = match storage_changes {
@@ -1749,6 +1752,7 @@ where
 	) -> Result<ImportResult, Self::Error> {
 		let span = tracing::span!(tracing::Level::DEBUG, "import_block");
 		let _enter = span.enter();
+		log::info!(target: "skunert", "We arrived at client");
 
 		let storage_changes =
 			match self.prepare_block_storage_changes(&mut import_block).map_err(|e| {

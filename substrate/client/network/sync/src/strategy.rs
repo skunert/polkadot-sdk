@@ -360,6 +360,8 @@ where
 						SyncingAction::SendBlockRequest { peer_id, request },
 					WarpSyncAction::DropPeer(bad_peer) => SyncingAction::DropPeer(bad_peer),
 					WarpSyncAction::Finished => SyncingAction::Finished,
+					WarpSyncAction::ImportHeaderAndJustification { origin, blocks } =>
+						SyncingAction::ImportBlocks { origin, blocks },
 				})),
 			SyncingStrategy::StateSyncStrategy(strategy) =>
 				Box::new(strategy.actions().map(|action| match action {

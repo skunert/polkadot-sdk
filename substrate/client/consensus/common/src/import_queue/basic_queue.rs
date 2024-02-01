@@ -429,6 +429,7 @@ async fn import_many_blocks<B: BlockT, V: Verifier<B>>(
 		let block_number = block.header.as_ref().map(|h| *h.number());
 		let block_hash = block.hash;
 		let import_result = if has_error {
+			log::info!(target: "skunert", "Cancelled block import due to previous error");
 			Err(BlockImportError::Cancelled)
 		} else {
 			// The actual import.

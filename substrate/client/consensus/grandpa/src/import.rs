@@ -545,6 +545,11 @@ where
 			return self.import_state(block).await
 		}
 
+		if block.origin == BlockOrigin::InitialWarp {
+			log::info!(target: "skunert", "Grandpa import: going special route");
+			return (&*self.inner).import_block(block).await
+		}
+
 		if number <= self.inner.info().finalized_number {
 			// Importing an old block. Just save justifications and authority set changes
 			if self.check_new_change(&block.header, hash).is_some() {
