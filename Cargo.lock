@@ -15439,6 +15439,7 @@ dependencies = [
  "quickcheck",
  "rand",
  "sc-client-api",
+ "sc-consensus-grandpa",
  "sc-state-db",
  "schnellru",
  "sp-arithmetic",

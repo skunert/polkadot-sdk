@@ -1813,7 +1813,7 @@ impl<Block: BlockT> Backend<Block> {
 		let new_displaced = self.blockchain.leaves.write().finalize_height(f_num);
 		self.prune_blocks(
 			transaction,
-			f_num,
+			f_header,
 			f_hash,
 			&new_displaced,
 			current_transaction_justifications,
@@ -1825,14 +1825,20 @@ impl<Block: BlockT> Backend<Block> {
 	fn prune_blocks(
 		&self,
 		transaction: &mut Transaction<DbHash>,
-		finalized_number: NumberFor<Block>,
+		finalized_header: &Block::Header,
 		finalized_hash: Block::Hash,
 		displaced: &FinalizationOutcome<Block::Hash, NumberFor<Block>>,
 		current_transaction_justifications: &mut HashMap<Block::Hash, Justification>,
 	) -> ClientResult<()> {
+		let finalized_number = *finalized_header.number();
 		match self.blocks_pruning {
 			BlocksPruning::KeepAll => {},
 			BlocksPruning::Some(blocks_pruning) => {
+				if sc_consensus_grandpa::find_scheduled_change::<Block>(finalized_header).is_some()
+				{
+					log::info!(target: "db", "Scheduled change detected, not pruning. #{} {}", finalized_number, finalized_hash);
+					return Ok(())
+				};
 				// Always keep the last finalized block
 				let keep = std::cmp::max(blocks_pruning, 1);
 				if finalized_number >= keep.into() {
