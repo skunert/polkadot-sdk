@@ -20,6 +20,7 @@ use cumulus_client_collator::service::CollatorService;
 use cumulus_client_consensus_aura::collators::{
 	basic::{self as basic_aura, Params as BasicAuraParams},
 	lookahead::{self as aura, Params as AuraParams},
+	slot_based_builder::{self as slot_based, Params as SlotParams},
 };
 use cumulus_client_consensus_common::{
 	ParachainBlockImport as TParachainBlockImport, ParachainCandidate, ParachainConsensus,
@@ -1685,96 +1686,173 @@ where
 		 backend| {
 			let relay_chain_interface2 = relay_chain_interface.clone();
 
-			let collator_service = CollatorService::new(
-				client.clone(),
-				Arc::new(task_manager.spawn_handle()),
-				announce_block,
-				client.clone(),
-			);
-
 			let spawner = task_manager.spawn_handle();
 
-			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
-				spawner,
-				client.clone(),
-				transaction_pool,
-				prometheus_registry,
-				telemetry.clone(),
-			);
+			let collation_future = Box::pin({
+				let collator_key = collator_key.clone();
+				let sync_oracle = sync_oracle.clone();
+				let client = client.clone();
+				let para_id = para_id.clone();
+				let backend = backend.clone();
+				let relay_chain_interface2 = relay_chain_interface2.clone();
+				let overseer_handle = overseer_handle.clone();
+				let transaction_pool = transaction_pool.clone();
+				let telemetry = telemetry.clone();
+				let keystore = keystore.clone();
+				let block_import = block_import.clone();
+				let collator_service = CollatorService::new(
+					client.clone(),
+					Arc::new(task_manager.spawn_handle()),
+					announce_block.clone(),
+					client.clone(),
+				);
 
-			let collation_future = Box::pin(async move {
-				// Start collating with the `shell` runtime while waiting for an upgrade to an Aura
-				// compatible runtime.
-				let mut request_stream = cumulus_client_collator::relay_chain_driven::init(
-					collator_key.clone(),
-					para_id,
-					overseer_handle.clone(),
-				)
-				.await;
-				while let Some(request) = request_stream.next().await {
-					let pvd = request.persisted_validation_data().clone();
-					let last_head_hash =
-						match <Block as BlockT>::Header::decode(&mut &pvd.parent_head.0[..]) {
-							Ok(header) => header.hash(),
-							Err(e) => {
-								log::error!("Could not decode the head data: {e}");
-								request.complete(None);
-								continue
-							},
-						};
+				async move {
+					// Start collating with the `shell` runtime while waiting for an upgrade to an
+					// Aura compatible runtime.
+					let mut request_stream = cumulus_client_collator::relay_chain_driven::init(
+						collator_key.clone(),
+						para_id,
+						overseer_handle.clone(),
+					)
+					.await;
+					while let Some(request) = request_stream.next().await {
+						let pvd = request.persisted_validation_data().clone();
+						let last_head_hash =
+							match <Block as BlockT>::Header::decode(&mut &pvd.parent_head.0[..]) {
+								Ok(header) => header.hash(),
+								Err(e) => {
+									log::error!("Could not decode the head data: {e}");
+									request.complete(None);
+									continue
+								},
+							};
 
-					// Check if we have upgraded to an Aura compatible runtime and transition if
-					// necessary.
-					if client
-						.runtime_api()
-						.has_api::<dyn AuraApi<Block, AuraId>>(last_head_hash)
-						.unwrap_or(false)
-					{
-						// Respond to this request before transitioning to Aura.
-						request.complete(None);
-						break
+						// Check if we have upgraded to an Aura compatible runtime and transition if
+						// necessary.
+						if client
+							.runtime_api()
+							.has_api::<dyn AuraApi<Block, AuraId>>(last_head_hash)
+							.unwrap_or(false)
+						{
+							// Respond to this request before transitioning to Aura.
+							request.complete(None);
+							break
+						}
 					}
-				}
 
-				// Move to Aura consensus.
-				let slot_duration = match cumulus_client_consensus_aura::slot_duration(&*client) {
-					Ok(d) => d,
-					Err(e) => {
-						log::error!("Could not get Aura slot duration: {e}");
-						return
-					},
-				};
+					// Move to Aura consensus.
+					let slot_duration = match cumulus_client_consensus_aura::slot_duration(&*client)
+					{
+						Ok(d) => d,
+						Err(e) => {
+							log::error!("Could not get Aura slot duration: {e}");
+							return
+						},
+					};
 
-				let proposer = Proposer::new(proposer_factory);
+					let proposer_factory =
+						sc_basic_authorship::ProposerFactory::with_proof_recording(
+							spawner,
+							client.clone(),
+							transaction_pool.clone(),
+							None,
+							telemetry.clone(),
+						);
+					let proposer = Proposer::new(proposer_factory);
+					let params = AuraParams {
+						create_inherent_data_providers: move |_, ()| async move { Ok(()) },
+						block_import,
+						para_client: client.clone(),
+						para_backend: backend,
+						relay_client: relay_chain_interface2,
+						code_hash_provider: move |block_hash| {
+							client.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
+						},
+						sync_oracle,
+						keystore,
+						collator_key,
+						para_id,
+						overseer_handle,
+						slot_duration,
+						relay_chain_slot_duration,
+						proposer,
+						collator_service,
+						authoring_duration: Duration::from_millis(1500),
+						reinitialize: true, /* we need to always re-initialize for asset-hub
+						                     * moving to aura */
+					};
 
-				let params = AuraParams {
-					create_inherent_data_providers: move |_, ()| async move { Ok(()) },
-					block_import,
-					para_client: client.clone(),
-					para_backend: backend,
-					relay_client: relay_chain_interface2,
-					code_hash_provider: move |block_hash| {
-						client.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
-					},
-					sync_oracle,
-					keystore,
-					collator_key,
-					para_id,
-					overseer_handle,
-					slot_duration,
-					relay_chain_slot_duration,
-					proposer,
-					collator_service,
-					authoring_duration: Duration::from_millis(1500),
-					reinitialize: true, /* we need to always re-initialize for asset-hub moving
-					                     * to aura */
-				};
-
-				aura::run::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _, _>(params)
+					aura::run::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _, _>(
+						params,
+					)
 					.await
+				}
 			});
 
 			let spawner = task_manager.spawn_essential_handle();
+
+			let collator_service = CollatorService::new(
+				client.clone(),
+				Arc::new(task_manager.spawn_handle()),
+				announce_block.clone(),
+				client.clone(),
+			);
+			// Move to Aura consensus.
+			let slot_duration = match cumulus_client_consensus_aura::slot_duration(&*client) {
+				Ok(d) => d,
+				Err(e) => {
+					log::error!("Could not get Aura slot duration: {e}");
+					// TODO skunert remove this panic
+					panic!()
+				},
+			};
+
+			log::info!(target: "skunert", "Passing through here");
+			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
+				task_manager.spawn_handle(),
+				client.clone(),
+				transaction_pool.clone(),
+				None,
+				telemetry.clone(),
+			);
+			let proposer = Proposer::new(proposer_factory);
+
+			let slot_params = SlotParams {
+				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
+				block_import,
+				para_client: client.clone(),
+				para_backend: backend,
+				relay_client: relay_chain_interface2,
+				code_hash_provider: move |block_hash| {
+					client.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
+				},
+				sync_oracle,
+				keystore,
+				collator_key,
+				para_id,
+				overseer_handle,
+				slot_duration,
+				relay_chain_slot_duration,
+				proposer,
+				collator_service,
+				authoring_duration: Duration::from_millis(1500),
+				reinitialize: true,
+			};
+			let fut = slot_based::run_block_builder::<
+				Block,
+				<AuraId as AppCrypto>::Pair,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+			>(slot_params);
+			spawner.spawn_essential("cumulus-asset-hub-block-builder", None, Box::pin(fut));
 			spawner.spawn_essential("cumulus-asset-hub-collator", None, collation_future);
 
 			Ok(())

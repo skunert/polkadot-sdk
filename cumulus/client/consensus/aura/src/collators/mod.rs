@@ -22,3 +22,4 @@
 
 pub mod basic;
 pub mod lookahead;
+pub mod slot_based_builder;

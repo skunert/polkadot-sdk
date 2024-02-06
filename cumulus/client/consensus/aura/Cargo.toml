@@ -51,3 +51,4 @@ polkadot-primitives = { path = "../../../../polkadot/primitives" }
 polkadot-node-primitives = { path = "../../../../polkadot/node/primitives" }
 polkadot-node-subsystem = { path = "../../../../polkadot/node/subsystem" }
 polkadot-overseer = { path = "../../../../polkadot/node/overseer" }
+tokio = "1.36.0"
