@@ -49,7 +49,7 @@ use polkadot_node_subsystem::messages::{
 	CollationGenerationMessage, RuntimeApiMessage, RuntimeApiRequest,
 };
 use polkadot_overseer::Handle as OverseerHandle;
-use polkadot_primitives::{CollatorPair, Id as ParaId, OccupiedCoreAssumption};
+use polkadot_primitives::{BlockId, CollatorPair, Id as ParaId, OccupiedCoreAssumption};
 
 use futures::{channel::oneshot, prelude::*};
 use sc_client_api::{backend::AuxStore, BlockBackend, BlockOf};
@@ -243,13 +243,39 @@ pub async fn run_block_builder<
 		create_inherent_data_providers,
 		para_client,
 		keystore,
+		block_import,
+		para_id,
+		proposer,
+		collator_service,
 		..
 	} = params;
 	let slot_timer = SlotTimer::new(slot_duration);
-	while let slot = slot_timer.wait_until_next_slot().await {
+	let mut collator = {
+		let params = collator_util::Params {
+			create_inherent_data_providers,
+			block_import,
+			relay_client: relay_client.clone(),
+			keystore: keystore.clone(),
+			para_id,
+			proposer,
+			collator_service,
+		};
+
+		collator_util::Collator::<Block, P, _, _, _, _, _>::new(params)
+	};
+
+	loop {
+		// We wait here until the next slot arrives.
+		let slot = slot_timer.wait_until_next_slot().await;
+
 		tracing::info!(target: "skunert", slot = ?slot.slot, "Producing block for slot.");
 		let Ok(relay_parent) = relay_client.best_block_hash().await else {
 			panic!("Unable to fetch latest relay chain block hash.");
+		};
+
+		let Ok(Some(relay_parent_header)) = relay_client.header(BlockId::Hash(relay_parent)).await
+		else {
+			panic!("Unable to fetch latest relay chain block header.");
 		};
 
 		let max_pov_size = match relay_client
@@ -311,16 +337,80 @@ pub async fn run_block_builder<
 			None => continue,
 			Some(p) => p,
 		};
+		let parent_header = initial_parent.header;
+		let parent_hash = initial_parent.hash;
 
-		// let can_build_upon = |block_hash| {
-		// 	can_build_upon::<_, _, P>(
-		// 		slot,
-		// 		Timestmap::curren,
-		// 		block_hash,
-		// 		included_block,
-		// 		para_client,
-		// 		&keystore,
-		// 	)
-		// };
+		let can_build_upon = |block_hash| {
+			can_build_upon::<_, _, P>(
+				slot.slot,
+				slot.timestamp,
+				block_hash,
+				included_block,
+				&*para_client,
+				&keystore,
+			)
+		};
+
+		let slot_claim = match can_build_upon(parent_hash).await {
+			None => break,
+			Some(c) => c,
+		};
+
+		tracing::debug!(
+			target: crate::LOG_TARGET,
+			?relay_parent,
+			slot_claim = ?slot.slot,
+			unincluded_segment_len = initial_parent.depth,
+			"Slot claimed. Building"
+		);
+
+		let validation_data = PersistedValidationData {
+			parent_head: parent_header.encode().into(),
+			relay_parent_number: *relay_parent_header.number(),
+			relay_parent_storage_root: *relay_parent_header.state_root(),
+			max_pov_size,
+		};
+
+		// Build and announce collations recursively until
+		// `can_build_upon` fails or building a collation fails.
+		let (parachain_inherent_data, other_inherent_data) = match collator
+			.create_inherent_data(relay_parent, &validation_data, parent_hash, slot.timestamp)
+			.await
+		{
+			Err(err) => {
+				tracing::error!(target: crate::LOG_TARGET, ?err);
+				break
+			},
+			Ok(x) => x,
+		};
+
+		let validation_code_hash = match params.code_hash_provider.code_hash_at(parent_hash) {
+			None => {
+				tracing::error!(target: crate::LOG_TARGET, ?parent_hash, "Could not fetch validation code hash");
+				break
+			},
+			Some(v) => v,
+		};
+		// TODO Send the collation to the collation worker
+		let Ok(Some((collation, block_data, new_block_hash))) = collator
+			.collate(
+				&parent_header,
+				&slot_claim,
+				None,
+				(parachain_inherent_data, other_inherent_data),
+				params.authoring_duration,
+				// Set the block limit to 50% of the maximum PoV size.
+				//
+				// TODO: If we got benchmarking that includes the proof size,
+				// we should be able to use the maximum pov size.
+				(validation_data.max_pov_size / 2) as usize,
+			)
+			.await
+		else {
+			tracing::error!(target: crate::LOG_TARGET, "Unable to build block at slot.");
+			continue;
+		};
+
+		collator.collator_service().announce_block(new_block_hash, None);
 	}
 }
