@@ -70,6 +70,13 @@ use std::{convert::TryFrom, sync::Arc, time::Duration};
 
 use crate::collator::{self as collator_util, SlotClaim};
 
+const PARENT_SEARCH_DEPTH: usize = 10;
+struct SlotAndTime {
+	timestamp: Timestamp,
+	slot: Slot,
+}
+
+#[derive(Debug)]
 struct SlotTimer {
 	slot_duration: SlotDuration,
 }
@@ -79,12 +86,13 @@ impl SlotTimer {
 		Self { slot_duration }
 	}
 
-	pub async fn wait_until_next_slot(&self) -> Slot {
+	pub async fn wait_until_next_slot(&self) -> SlotAndTime {
 		// TODO skunert: Come back here and check for the inherent data providers. How is the slot
 		// included in ther inherents?
 		let time_until_next_slot = time_until_next_slot(self.slot_duration.as_duration());
 		tokio::time::sleep(time_until_next_slot).await;
-		Slot::from_timestamp(sp_timestamp::Timestamp::current(), self.slot_duration)
+		let timestamp = sp_timestamp::Timestamp::current();
+		SlotAndTime { slot: Slot::from_timestamp(timestamp, self.slot_duration), timestamp }
 	}
 }
 
@@ -128,6 +136,67 @@ pub struct Params<BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS> {
 	pub reinitialize: bool,
 }
 
+/// Reads allowed ancestry length parameter from the relay chain storage at the given relay parent.
+///
+/// Falls back to 0 in case of an error.
+async fn max_ancestry_lookback(
+	relay_parent: PHash,
+	relay_client: &impl RelayChainInterface,
+) -> usize {
+	match load_abridged_host_configuration(relay_parent, relay_client).await {
+		Ok(Some(config)) => config.async_backing_params.allowed_ancestry_len as usize,
+		Ok(None) => {
+			tracing::error!(
+				target: crate::LOG_TARGET,
+				"Active config is missing in relay chain storage",
+			);
+			0
+		},
+		Err(err) => {
+			tracing::error!(
+				target: crate::LOG_TARGET,
+				?err,
+				?relay_parent,
+				"Failed to read active config from relay chain client",
+			);
+			0
+		},
+	}
+}
+
+// Checks if we own the slot at the given block and whether there
+// is space in the unincluded segment.
+async fn can_build_upon<Block: BlockT, Client, P>(
+	slot: Slot,
+	timestamp: Timestamp,
+	parent_hash: Block::Hash,
+	included_block: Block::Hash,
+	client: &Client,
+	keystore: &KeystorePtr,
+) -> Option<SlotClaim<P::Public>>
+where
+	Client: ProvideRuntimeApi<Block>,
+	Client::Api: AuraApi<Block, P::Public> + AuraUnincludedSegmentApi<Block>,
+	P: Pair,
+	P::Public: Codec,
+	P::Signature: Codec,
+{
+	let runtime_api = client.runtime_api();
+	let authorities = runtime_api.authorities(parent_hash).ok()?;
+	let author_pub = aura_internal::claim_slot::<P>(slot, &authorities, keystore).await?;
+
+	// Here we lean on the property that building on an empty unincluded segment must always
+	// be legal. Skipping the runtime API query here allows us to seamlessly run this
+	// collator against chains which have not yet upgraded their runtime.
+	if parent_hash != included_block {
+		if !runtime_api.can_build_upon(parent_hash, included_block, slot).ok()? {
+			return None
+		}
+	}
+
+	Some(SlotClaim::unchecked::<P>(author_pub, slot, timestamp))
+}
+
 /// Run async-backing-friendly Aura.
 pub async fn run_block_builder<
 	Block,
@@ -168,9 +237,90 @@ pub async fn run_block_builder<
 	P::Public: AppPublic + Member + Codec,
 	P::Signature: TryFrom<Vec<u8>> + Member + Codec,
 {
-	let Params { slot_duration, create_inherent_data_providers, .. } = params;
+	let Params {
+		slot_duration,
+		relay_client,
+		create_inherent_data_providers,
+		para_client,
+		keystore,
+		..
+	} = params;
 	let slot_timer = SlotTimer::new(slot_duration);
 	while let slot = slot_timer.wait_until_next_slot().await {
-		tracing::info!(target: "skunert", slot = ?slot, "Producing block for slot.");
+		tracing::info!(target: "skunert", slot = ?slot.slot, "Producing block for slot.");
+		let Ok(relay_parent) = relay_client.best_block_hash().await else {
+			panic!("Unable to fetch latest relay chain block hash.");
+		};
+
+		let max_pov_size = match relay_client
+			.persisted_validation_data(
+				relay_parent,
+				params.para_id,
+				OccupiedCoreAssumption::Included,
+			)
+			.await
+		{
+			Ok(None) => continue,
+			Ok(Some(pvd)) => pvd.max_pov_size,
+			Err(err) => {
+				tracing::error!(target: crate::LOG_TARGET, ?err, "Failed to gather information from relay-client");
+				continue
+			},
+		};
+
+		let parent_search_params = ParentSearchParams {
+			relay_parent,
+			para_id: params.para_id,
+			ancestry_lookback: max_ancestry_lookback(relay_parent, &relay_client).await,
+			max_depth: PARENT_SEARCH_DEPTH,
+			ignore_alternative_branches: true,
+		};
+
+		let potential_parents = cumulus_client_consensus_common::find_potential_parents::<Block>(
+			parent_search_params,
+			&*params.para_backend,
+			&relay_client,
+		)
+		.await;
+
+		let mut potential_parents = match potential_parents {
+			Err(e) => {
+				tracing::error!(
+					target: crate::LOG_TARGET,
+					?relay_parent,
+					err = ?e,
+					"Could not fetch potential parents to build upon"
+				);
+
+				continue
+			},
+			Ok(x) => x,
+		};
+
+		let included_block = match potential_parents.iter().find(|x| x.depth == 0) {
+			None => continue, // also serves as an `is_empty` check.
+			Some(b) => b.hash,
+		};
+
+		// Sort by depth, ascending, to choose the longest chain.
+		//
+		// If the longest chain has space, build upon that. Otherwise, don't
+		// build at all.
+		potential_parents.sort_by_key(|a| a.depth);
+		let initial_parent = match potential_parents.pop() {
+			None => continue,
+			Some(p) => p,
+		};
+
+		// let can_build_upon = |block_hash| {
+		// 	can_build_upon::<_, _, P>(
+		// 		slot,
+		// 		Timestmap::curren,
+		// 		block_hash,
+		// 		included_block,
+		// 		para_client,
+		// 		&keystore,
+		// 	)
+		// };
 	}
 }

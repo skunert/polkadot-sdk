@@ -309,6 +309,7 @@ where
 				tracing::debug!(
 					target: crate::LOG_TARGET,
 					?relay_parent,
+					slot_claim = ?slot_now,
 					unincluded_segment_len = initial_parent.depth + n_built,
 					"Slot claimed. Building"
 				);
