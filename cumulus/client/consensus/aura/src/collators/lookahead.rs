@@ -69,8 +69,10 @@ use std::{convert::TryFrom, sync::Arc, time::Duration};
 
 use crate::collator::{self as collator_util, SlotClaim};
 
+use super::slot_based_builder::CollatorMessage;
+
 /// Parameters for [`run`].
-pub struct Params<BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS> {
+pub struct Params<Block: BlockT, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS> {
 	/// Inherent data providers. Only non-consensus inherent data should be provided, i.e.
 	/// the timestamp, slot, and paras inherents should be omitted, as they are set by this
 	/// collator.
@@ -107,11 +109,12 @@ pub struct Params<BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS> {
 	pub authoring_duration: Duration,
 	/// Whether we should reinitialize the collator config (i.e. we are transitioning to aura).
 	pub reinitialize: bool,
+	pub collator_receiver: tokio::sync::mpsc::Receiver<CollatorMessage<Block>>,
 }
 
 /// Run async-backing-friendly Aura.
 pub fn run<Block, P, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>(
-	mut params: Params<BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>,
+	mut params: Params<Block, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>,
 ) -> impl Future<Output = ()> + Send + 'static
 where
 	Block: BlockT,
@@ -138,14 +141,6 @@ where
 	P::Public: AppPublic + Member + Codec,
 	P::Signature: TryFrom<Vec<u8>> + Member + Codec,
 {
-	// This is an arbitrary value which is likely guaranteed to exceed any reasonable
-	// limit, as it would correspond to 10 non-included blocks.
-	//
-	// Since we only search for parent blocks which have already been imported,
-	// we can guarantee that all imported blocks respect the unincluded segment
-	// rules specified by the parachain's runtime and thus will never be too deep.
-	const PARENT_SEARCH_DEPTH: usize = 10;
-
 	async move {
 		cumulus_client_collator::initialize_collator_subsystems(
 			&mut params.overseer_handle,
@@ -169,25 +164,11 @@ where
 			},
 		};
 
-		let mut collator = {
-			let params = collator_util::Params {
-				create_inherent_data_providers: params.create_inherent_data_providers,
-				block_import: params.block_import,
-				relay_client: params.relay_client.clone(),
-				keystore: params.keystore.clone(),
-				para_id: params.para_id,
-				proposer: params.proposer,
-				collator_service: params.collator_service,
-			};
-
-			collator_util::Collator::<Block, P, _, _, _, _, _>::new(params)
-		};
-
 		while let Some(relay_parent_header) = import_notifications.next().await {
 			let relay_parent = relay_parent_header.hash();
 
 			if !is_para_scheduled(relay_parent, params.para_id, &mut params.overseer_handle).await {
-				tracing::trace!(
+				tracing::info!(
 					target: crate::LOG_TARGET,
 					?relay_parent,
 					?params.para_id,
@@ -197,209 +178,26 @@ where
 				continue
 			}
 
-			let max_pov_size = match params
-				.relay_client
-				.persisted_validation_data(
-					relay_parent,
-					params.para_id,
-					OccupiedCoreAssumption::Included,
-				)
-				.await
-			{
-				Ok(None) => continue,
-				Ok(Some(pvd)) => pvd.max_pov_size,
-				Err(err) => {
-					tracing::error!(target: crate::LOG_TARGET, ?err, "Failed to gather information from relay-client");
-					continue
-				},
-			};
-
-			let (slot_now, timestamp) = match consensus_common::relay_slot_and_timestamp(
-				&relay_parent_header,
-				params.relay_chain_slot_duration,
-			) {
-				None => continue,
-				Some((r_s, t)) => {
-					let our_slot = Slot::from_timestamp(t, params.slot_duration);
-					tracing::debug!(
-						target: crate::LOG_TARGET,
-						relay_slot = ?r_s,
-						para_slot = ?our_slot,
-						timestamp = ?t,
-						slot_duration = ?params.slot_duration,
-						relay_chain_slot_duration = ?params.relay_chain_slot_duration,
-						"Adjusted relay-chain slot to parachain slot"
-					);
-					(our_slot, t)
-				},
-			};
-
-			let parent_search_params = ParentSearchParams {
-				relay_parent,
-				para_id: params.para_id,
-				ancestry_lookback: max_ancestry_lookback(relay_parent, &params.relay_client).await,
-				max_depth: PARENT_SEARCH_DEPTH,
-				ignore_alternative_branches: true,
-			};
-
-			let potential_parents =
-				cumulus_client_consensus_common::find_potential_parents::<Block>(
-					parent_search_params,
-					&*params.para_backend,
-					&params.relay_client,
-				)
-				.await;
-
-			let mut potential_parents = match potential_parents {
-				Err(e) => {
-					tracing::error!(
-						target: crate::LOG_TARGET,
-						?relay_parent,
-						err = ?e,
-						"Could not fetch potential parents to build upon"
-					);
-
-					continue
-				},
-				Ok(x) => x,
-			};
-
-			let included_block = match potential_parents.iter().find(|x| x.depth == 0) {
-				None => continue, // also serves as an `is_empty` check.
-				Some(b) => b.hash,
-			};
-
-			let para_client = &*params.para_client;
-			let keystore = &params.keystore;
-			let can_build_upon = |block_hash| {
-				can_build_upon::<_, _, P>(
-					slot_now,
-					timestamp,
-					block_hash,
-					included_block,
-					para_client,
-					&keystore,
-				)
-			};
-
-			// Sort by depth, ascending, to choose the longest chain.
-			//
-			// If the longest chain has space, build upon that. Otherwise, don't
-			// build at all.
-			potential_parents.sort_by_key(|a| a.depth);
-			let initial_parent = match potential_parents.pop() {
-				None => continue,
-				Some(p) => p,
-			};
-
-			// Build in a loop until not allowed. Note that the authorities can change
-			// at any block, so we need to re-claim our slot every time.
-			let mut parent_hash = initial_parent.hash;
-			let mut parent_header = initial_parent.header;
-			let overseer_handle = &mut params.overseer_handle;
-
-			// This needs to change to support elastic scaling, but for continuously
-			// scheduled chains this ensures that the backlog will grow steadily.
-			for n_built in 0..2 {
-				let slot_claim = match can_build_upon(parent_hash).await {
-					None => break,
-					Some(c) => c,
-				};
-
-				tracing::debug!(
-					target: crate::LOG_TARGET,
-					?relay_parent,
-					slot_claim = ?slot_now,
-					unincluded_segment_len = initial_parent.depth + n_built,
-					"Slot claimed. Building"
-				);
-
-				let validation_data = PersistedValidationData {
-					parent_head: parent_header.encode().into(),
-					relay_parent_number: *relay_parent_header.number(),
-					relay_parent_storage_root: *relay_parent_header.state_root(),
-					max_pov_size,
-				};
-
-				// Build and announce collations recursively until
-				// `can_build_upon` fails or building a collation fails.
-				let (parachain_inherent_data, other_inherent_data) = match collator
-					.create_inherent_data(
-						relay_parent,
-						&validation_data,
-						parent_hash,
-						slot_claim.timestamp(),
+			while let Some(collator_message) = params.collator_receiver.recv().await {
+				// Send a submit-collation message to the collation generation subsystem,
+				// which then distributes this to validators.
+				//
+				// Here we are assuming that the leaf is imported, as we've gotten an
+				// import notification.
+				tracing::info!(target: "skunert", "Received collation, submitting to collator subsystem.");
+				params
+					.overseer_handle
+					.send_msg(
+						CollationGenerationMessage::SubmitCollation(SubmitCollationParams {
+							relay_parent: collator_message.relay_parent,
+							collation: collator_message.collation,
+							parent_head: collator_message.parent_header.encode().into(),
+							validation_code_hash: collator_message.validation_code_hash,
+							result_sender: None,
+						}),
+						"SubmitCollation",
 					)
-					.await
-				{
-					Err(err) => {
-						tracing::error!(target: crate::LOG_TARGET, ?err);
-						break
-					},
-					Ok(x) => x,
-				};
-
-				let validation_code_hash = match params.code_hash_provider.code_hash_at(parent_hash)
-				{
-					None => {
-						tracing::error!(target: crate::LOG_TARGET, ?parent_hash, "Could not fetch validation code hash");
-						break
-					},
-					Some(v) => v,
-				};
-
-				match collator
-					.collate(
-						&parent_header,
-						&slot_claim,
-						None,
-						(parachain_inherent_data, other_inherent_data),
-						params.authoring_duration,
-						// Set the block limit to 50% of the maximum PoV size.
-						//
-						// TODO: If we got benchmarking that includes the proof size,
-						// we should be able to use the maximum pov size.
-						(validation_data.max_pov_size / 2) as usize,
-					)
-					.await
-				{
-					Ok(Some((collation, block_data, new_block_hash))) => {
-						// Here we are assuming that the import logic protects against equivocations
-						// and provides sybil-resistance, as it should.
-						collator.collator_service().announce_block(new_block_hash, None);
-
-						// Send a submit-collation message to the collation generation subsystem,
-						// which then distributes this to validators.
-						//
-						// Here we are assuming that the leaf is imported, as we've gotten an
-						// import notification.
-						overseer_handle
-							.send_msg(
-								CollationGenerationMessage::SubmitCollation(
-									SubmitCollationParams {
-										relay_parent,
-										collation,
-										parent_head: parent_header.encode().into(),
-										validation_code_hash,
-										result_sender: None,
-									},
-								),
-								"SubmitCollation",
-							)
-							.await;
-
-						parent_hash = new_block_hash;
-						parent_header = block_data.into_header();
-					},
-					Ok(None) => {
-						tracing::debug!(target: crate::LOG_TARGET, "No block proposal");
-						break
-					},
-					Err(err) => {
-						tracing::error!(target: crate::LOG_TARGET, ?err);
-						break
-					},
-				}
+					.await;
 			}
 		}
 	}

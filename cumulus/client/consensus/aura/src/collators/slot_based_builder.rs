@@ -40,16 +40,19 @@ use cumulus_client_consensus_common::{
 use cumulus_client_consensus_proposer::ProposerInterface;
 use cumulus_primitives_aura::AuraUnincludedSegmentApi;
 use cumulus_primitives_core::{
-	relay_chain::Hash as PHash, CollectCollationInfo, PersistedValidationData,
+	relay_chain::Hash as PHash, CollectCollationInfo, ParachainBlockData, PersistedValidationData,
 };
 use cumulus_relay_chain_interface::RelayChainInterface;
 
-use polkadot_node_primitives::SubmitCollationParams;
+use polkadot_node_primitives::{Collation, SubmitCollationParams};
 use polkadot_node_subsystem::messages::{
 	CollationGenerationMessage, RuntimeApiMessage, RuntimeApiRequest,
 };
 use polkadot_overseer::Handle as OverseerHandle;
-use polkadot_primitives::{BlockId, CollatorPair, Id as ParaId, OccupiedCoreAssumption};
+use polkadot_primitives::{
+	BlockId, CollatorPair, Hash as RelayHash, Id as ParaId, OccupiedCoreAssumption,
+	ValidationCodeHash,
+};
 
 use futures::{channel::oneshot, prelude::*};
 use sc_client_api::{backend::AuxStore, BlockBackend, BlockOf};
@@ -97,7 +100,7 @@ impl SlotTimer {
 }
 
 /// Parameters for [`run`].
-pub struct Params<BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS> {
+pub struct Params<Block: BlockT, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS> {
 	/// Inherent data providers. Only non-consensus inherent data should be provided, i.e.
 	/// the timestamp, slot, and paras inherents should be omitted, as they are set by this
 	/// collator.
@@ -134,6 +137,8 @@ pub struct Params<BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS> {
 	pub authoring_duration: Duration,
 	/// Whether we should reinitialize the collator config (i.e. we are transitioning to aura).
 	pub reinitialize: bool,
+
+	pub collator_sender: tokio::sync::mpsc::Sender<CollatorMessage<Block>>,
 }
 
 /// Reads allowed ancestry length parameter from the relay chain storage at the given relay parent.
@@ -211,7 +216,7 @@ pub async fn run_block_builder<
 	Proposer,
 	CS,
 >(
-	mut params: Params<BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>,
+	mut params: Params<Block, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>,
 ) where
 	Block: BlockT,
 	Client: ProvideRuntimeApi<Block>
@@ -247,6 +252,7 @@ pub async fn run_block_builder<
 		para_id,
 		proposer,
 		collator_service,
+		collator_sender,
 		..
 	} = params;
 	let slot_timer = SlotTimer::new(slot_duration);
@@ -411,6 +417,28 @@ pub async fn run_block_builder<
 			continue;
 		};
 
+		tracing::info!(target: "skunert", hash = ?new_block_hash, "Announcing block.");
 		collator.collator_service().announce_block(new_block_hash, None);
+		tracing::info!(target: "skunert", "Sending collation to collator task.");
+		collator_sender
+			.send(CollatorMessage {
+				relay_parent: relay_parent_header.hash(),
+				parent_header,
+				collation,
+				block_data,
+				hash: new_block_hash,
+				validation_code_hash,
+			})
+			.await
+			.expect("unable to send!!");
 	}
+}
+
+pub struct CollatorMessage<Block: BlockT> {
+	pub relay_parent: RelayHash,
+	pub parent_header: Block::Header,
+	pub collation: Collation,
+	pub block_data: ParachainBlockData<Block>,
+	pub hash: Block::Hash,
+	pub validation_code_hash: ValidationCodeHash,
 }

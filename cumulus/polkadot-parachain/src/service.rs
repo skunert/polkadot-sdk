@@ -958,6 +958,7 @@ pub async fn start_rococo_parachain_node(
 				client.clone(),
 			);
 
+			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let params = AuraParams {
 				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
 				block_import,
@@ -978,6 +979,7 @@ pub async fn start_rococo_parachain_node(
 				collator_service,
 				authoring_duration: Duration::from_millis(1500),
 				reinitialize: false,
+				collator_receiver: rx,
 			};
 
 			let fut = aura::run::<
@@ -1454,6 +1456,7 @@ where
 				client.clone(),
 			);
 
+			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let params = AuraParams {
 				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
 				block_import,
@@ -1474,6 +1477,7 @@ where
 				collator_service,
 				authoring_duration: Duration::from_millis(1500),
 				reinitialize: false,
+				collator_receiver: rx,
 			};
 
 			let fut =
@@ -1688,6 +1692,7 @@ where
 
 			let spawner = task_manager.spawn_handle();
 
+			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let collation_future = Box::pin({
 				let collator_key = collator_key.clone();
 				let sync_oracle = sync_oracle.clone();
@@ -1753,7 +1758,7 @@ where
 
 					let proposer_factory =
 						sc_basic_authorship::ProposerFactory::with_proof_recording(
-							spawner,
+							spawner.clone(),
 							client.clone(),
 							transaction_pool.clone(),
 							None,
@@ -1779,8 +1784,9 @@ where
 						proposer,
 						collator_service,
 						authoring_duration: Duration::from_millis(1500),
-						reinitialize: true, /* we need to always re-initialize for asset-hub
-						                     * moving to aura */
+						// we need to always re-initialize for asset-hub moving to aura
+						reinitialize: true,
+						collator_receiver: rx,
 					};
 
 					aura::run::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _, _>(
@@ -1838,6 +1844,7 @@ where
 				collator_service,
 				authoring_duration: Duration::from_millis(1500),
 				reinitialize: true,
+				collator_sender: tx,
 			};
 			let fut = slot_based::run_block_builder::<
 				Block,
@@ -1928,6 +1935,7 @@ where
 				client.clone(),
 			);
 
+			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let params = AuraParams {
 				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
 				block_import,
@@ -1948,6 +1956,7 @@ where
 				collator_service,
 				authoring_duration: Duration::from_millis(1500),
 				reinitialize: false,
+				collator_receiver: rx,
 			};
 
 			let fut =
@@ -2237,6 +2246,7 @@ pub async fn start_contracts_rococo_node(
 				client.clone(),
 			);
 
+			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let params = AuraParams {
 				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
 				block_import,
@@ -2258,6 +2268,7 @@ pub async fn start_contracts_rococo_node(
 				// Very limited proposal time.
 				authoring_duration: Duration::from_millis(1500),
 				reinitialize: false,
+				collator_receiver: rx,
 			};
 
 			let fut = aura::run::<
