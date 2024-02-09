@@ -167,6 +167,13 @@ where
 		while let Some(relay_parent_header) = import_notifications.next().await {
 			let relay_parent = relay_parent_header.hash();
 
+			tracing::info!(
+				target: crate::LOG_TARGET,
+				?relay_parent,
+				?params.para_id,
+				"Another round in lookahead collator",
+			);
+
 			if !is_para_scheduled(relay_parent, params.para_id, &mut params.overseer_handle).await {
 				tracing::info!(
 					target: crate::LOG_TARGET,

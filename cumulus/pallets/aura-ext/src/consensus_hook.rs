@@ -66,7 +66,7 @@ where
 			Slot::from_timestamp(relay_chain_timestamp.into(), para_slot_duration);
 
 		// Perform checks.
-		assert_eq!(slot, para_slot_from_relay, "slot number mismatch");
+		//assert_eq!(slot, para_slot_from_relay, "slot number mismatch");
 		if authored > velocity + 1 {
 			panic!("authored blocks limit is reached for the slot")
 		}

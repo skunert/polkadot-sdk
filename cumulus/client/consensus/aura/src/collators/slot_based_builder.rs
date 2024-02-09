@@ -253,6 +253,7 @@ pub async fn run_block_builder<
 		proposer,
 		collator_service,
 		collator_sender,
+		mut overseer_handle,
 		..
 	} = params;
 	let slot_timer = SlotTimer::new(slot_duration);
@@ -270,6 +271,7 @@ pub async fn run_block_builder<
 		collator_util::Collator::<Block, P, _, _, _, _, _>::new(params)
 	};
 
+	tracing::info!(target: "skunert", "Passing through here on the worker");
 	loop {
 		// We wait here until the next slot arrives.
 		let slot = slot_timer.wait_until_next_slot().await;
@@ -278,6 +280,12 @@ pub async fn run_block_builder<
 		let Ok(relay_parent) = relay_client.best_block_hash().await else {
 			panic!("Unable to fetch latest relay chain block hash.");
 		};
+
+		// TODO skunert get rid of overseer handle here since we can use relay chain interface
+		if !is_para_scheduled(relay_parent, para_id, &mut overseer_handle).await {
+			tracing::info!(target: "skunert", "Our para is not scheduled, maybe next time.");
+			continue;
+		}
 
 		let Ok(Some(relay_parent_header)) = relay_client.header(BlockId::Hash(relay_parent)).await
 		else {
@@ -441,4 +449,39 @@ pub struct CollatorMessage<Block: BlockT> {
 	pub block_data: ParachainBlockData<Block>,
 	pub hash: Block::Hash,
 	pub validation_code_hash: ValidationCodeHash,
+}
+
+async fn is_para_scheduled(
+	relay_parent: PHash,
+	para_id: ParaId,
+	overseer_handle: &mut OverseerHandle,
+) -> bool {
+	let (tx, rx) = oneshot::channel();
+	let request = RuntimeApiRequest::AvailabilityCores(tx);
+	overseer_handle
+		.send_msg(RuntimeApiMessage::Request(relay_parent, request), "LookaheadCollator")
+		.await;
+
+	let cores = match rx.await {
+		Ok(Ok(cores)) => cores,
+		Ok(Err(error)) => {
+			tracing::error!(
+				target: crate::LOG_TARGET,
+				?error,
+				?relay_parent,
+				"Failed to query availability cores runtime API",
+			);
+			return false
+		},
+		Err(oneshot::Canceled) => {
+			tracing::error!(
+				target: crate::LOG_TARGET,
+				?relay_parent,
+				"Sender for availability cores runtime request dropped",
+			);
+			return false
+		},
+	};
+
+	cores.iter().any(|core| core.para_id() == Some(para_id))
 }
