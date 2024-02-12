@@ -31,14 +31,9 @@
 //! The main limitation is block propagation time - i.e. the new blocks created by an author
 //! must be propagated to the next author before their turn.
 
-use codec::{Encode};
+use codec::Encode;
 
-
-
-
-use cumulus_primitives_core::{
-	relay_chain::Hash as PHash,
-};
+use cumulus_primitives_core::relay_chain::Hash as PHash;
 use cumulus_relay_chain_interface::RelayChainInterface;
 
 use polkadot_node_primitives::SubmitCollationParams;
@@ -50,21 +45,11 @@ use polkadot_primitives::{CollatorPair, Id as ParaId};
 
 use futures::{channel::oneshot, prelude::*};
 
-
-
-
-
 use sp_blockchain::HeaderBackend;
 
-use sp_consensus_aura::{SlotDuration};
-
-
+use sp_consensus_aura::SlotDuration;
 
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
-
-
-
-
 
 use super::slot_based_builder::CollatorMessage;
 

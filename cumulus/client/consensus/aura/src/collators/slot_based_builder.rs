@@ -44,10 +44,8 @@ use cumulus_primitives_core::{
 };
 use cumulus_relay_chain_interface::RelayChainInterface;
 
-use polkadot_node_primitives::{Collation};
-use polkadot_node_subsystem::messages::{
-	RuntimeApiMessage, RuntimeApiRequest,
-};
+use polkadot_node_primitives::Collation;
+use polkadot_node_subsystem::messages::{RuntimeApiMessage, RuntimeApiRequest};
 use polkadot_overseer::Handle as OverseerHandle;
 use polkadot_primitives::{
 	BlockId, CollatorPair, Hash as RelayHash, Id as ParaId, OccupiedCoreAssumption,
@@ -92,7 +90,13 @@ impl SlotTimer {
 	pub async fn wait_until_next_slot(&self) -> SlotAndTime {
 		// TODO skunert: Come back here and check for the inherent data providers. How is the slot
 		// included in ther inherents?
-		let time_until_next_slot = time_until_next_slot(self.slot_duration.as_duration());
+		self.wait_until_next_slot_with_drift(Duration::from_secs(0)).await
+	}
+
+	pub async fn wait_until_next_slot_with_drift(&self, drift: Duration) -> SlotAndTime {
+		// TODO skunert: Come back here and check for the inherent data providers. How is the slot
+		// included in ther inherents?
+		let time_until_next_slot = time_until_next_slot(self.slot_duration.as_duration()) + drift;
 		tokio::time::sleep(time_until_next_slot).await;
 		let timestamp = sp_timestamp::Timestamp::current();
 		SlotAndTime { slot: Slot::from_timestamp(timestamp, self.slot_duration), timestamp }
@@ -274,7 +278,7 @@ pub async fn run_block_builder<
 	tracing::info!(target: "skunert", "Passing through here on the worker");
 	loop {
 		// We wait here until the next slot arrives.
-		let slot = slot_timer.wait_until_next_slot().await;
+		let slot = slot_timer.wait_until_next_slot_with_drift(Duration::from_millis(500)).await;
 
 		tracing::info!(target: "skunert", slot = ?slot.slot, "Producing block for slot.");
 		let Ok(relay_parent) = relay_client.best_block_hash().await else {
