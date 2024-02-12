@@ -44,9 +44,9 @@ use cumulus_primitives_core::{
 };
 use cumulus_relay_chain_interface::RelayChainInterface;
 
-use polkadot_node_primitives::{Collation, SubmitCollationParams};
+use polkadot_node_primitives::{Collation};
 use polkadot_node_subsystem::messages::{
-	CollationGenerationMessage, RuntimeApiMessage, RuntimeApiRequest,
+	RuntimeApiMessage, RuntimeApiRequest,
 };
 use polkadot_overseer::Handle as OverseerHandle;
 use polkadot_primitives::{
@@ -216,7 +216,7 @@ pub async fn run_block_builder<
 	Proposer,
 	CS,
 >(
-	mut params: Params<Block, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>,
+	params: Params<Block, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>,
 ) where
 	Block: BlockT,
 	Client: ProvideRuntimeApi<Block>

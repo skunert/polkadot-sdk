@@ -31,16 +31,13 @@
 //! The main limitation is block propagation time - i.e. the new blocks created by an author
 //! must be propagated to the next author before their turn.
 
-use codec::{Codec, Encode};
-use cumulus_client_collator::service::ServiceInterface as CollatorServiceInterface;
-use cumulus_client_consensus_common::{
-	self as consensus_common, load_abridged_host_configuration, ParachainBlockImportMarker,
-	ParentSearchParams,
-};
-use cumulus_client_consensus_proposer::ProposerInterface;
-use cumulus_primitives_aura::AuraUnincludedSegmentApi;
+use codec::{Encode};
+
+
+
+
 use cumulus_primitives_core::{
-	relay_chain::Hash as PHash, CollectCollationInfo, PersistedValidationData,
+	relay_chain::Hash as PHash,
 };
 use cumulus_relay_chain_interface::RelayChainInterface;
 
@@ -49,25 +46,25 @@ use polkadot_node_subsystem::messages::{
 	CollationGenerationMessage, RuntimeApiMessage, RuntimeApiRequest,
 };
 use polkadot_overseer::Handle as OverseerHandle;
-use polkadot_primitives::{CollatorPair, Id as ParaId, OccupiedCoreAssumption};
+use polkadot_primitives::{CollatorPair, Id as ParaId};
 
 use futures::{channel::oneshot, prelude::*};
-use sc_client_api::{backend::AuxStore, BlockBackend, BlockOf};
-use sc_consensus::BlockImport;
-use sc_consensus_aura::standalone as aura_internal;
-use sp_api::ProvideRuntimeApi;
-use sp_application_crypto::AppPublic;
-use sp_blockchain::HeaderBackend;
-use sp_consensus::SyncOracle;
-use sp_consensus_aura::{AuraApi, Slot, SlotDuration};
-use sp_core::crypto::Pair;
-use sp_inherents::CreateInherentDataProviders;
-use sp_keystore::KeystorePtr;
-use sp_runtime::traits::{Block as BlockT, Header as HeaderT, Member};
-use sp_timestamp::Timestamp;
-use std::{convert::TryFrom, sync::Arc, time::Duration};
 
-use crate::collator::{self as collator_util, SlotClaim};
+
+
+
+
+use sp_blockchain::HeaderBackend;
+
+use sp_consensus_aura::{SlotDuration};
+
+
+
+use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
+
+
+
+
 
 use super::slot_based_builder::CollatorMessage;
 
