@@ -56,7 +56,7 @@ use sc_network_sync::SyncingService;
 use sc_service::{Configuration, PartialComponents, TFullBackend, TFullClient, TaskManager};
 use sc_telemetry::{Telemetry, TelemetryHandle, TelemetryWorker, TelemetryWorkerHandle};
 use sp_api::{ApiExt, ConstructRuntimeApi, ProvideRuntimeApi};
-use sp_consensus_aura::AuraApi;
+use sp_consensus_aura::{sr25519::AuthorityPair, AuraApi};
 use sp_core::traits::SpawnEssentialNamed;
 use sp_keystore::KeystorePtr;
 use sp_runtime::{
@@ -942,28 +942,39 @@ pub async fn start_rococo_parachain_node(
 		 backend| {
 			let slot_duration = cumulus_client_consensus_aura::slot_duration(&*client)?;
 
-			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
-				task_manager.spawn_handle(),
-				client.clone(),
-				transaction_pool,
-				prometheus_registry,
-				telemetry.clone(),
-			);
-			let proposer = Proposer::new(proposer_factory);
-
-			let collator_service = CollatorService::new(
-				client.clone(),
-				Arc::new(task_manager.spawn_handle()),
-				announce_block,
-				client.clone(),
-			);
-
 			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let params = AuraParams {
+				relay_client: relay_chain_interface.clone(),
+				collator_key: collator_key.clone(),
+				para_id,
+				slot_duration,
+				overseer_handle: overseer_handle.clone(),
+				reinitialize: false,
+				collator_receiver: rx,
+			};
+
+			let fut = aura::run::<Block, _>(params);
+
+			let spawner = task_manager.spawn_handle();
+			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
+				spawner.clone(),
+				client.clone(),
+				transaction_pool.clone(),
+				None,
+				telemetry.clone(),
+			);
+			let collator_service = CollatorService::new(
+				client.clone(),
+				Arc::new(spawner.clone()),
+				announce_block.clone(),
+				client.clone(),
+			);
+			let proposer = Proposer::new(proposer_factory);
+			let slot_params = SlotParams {
 				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
 				block_import,
 				para_client: client.clone(),
-				para_backend: backend.clone(),
+				para_backend: backend,
 				relay_client: relay_chain_interface,
 				code_hash_provider: move |block_hash| {
 					client.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
@@ -978,11 +989,10 @@ pub async fn start_rococo_parachain_node(
 				proposer,
 				collator_service,
 				authoring_duration: Duration::from_millis(1500),
-				reinitialize: false,
-				collator_receiver: rx,
+				reinitialize: true,
+				collator_sender: tx,
 			};
-
-			let fut = aura::run::<
+			let block_builder_fut = slot_based::run_block_builder::<
 				Block,
 				sp_consensus_aura::sr25519::AuthorityPair,
 				_,
@@ -994,7 +1004,9 @@ pub async fn start_rococo_parachain_node(
 				_,
 				_,
 				_,
-			>(params);
+			>(slot_params);
+			spawner.spawn("cumulus-asset-hub-block-builder", None, Box::pin(block_builder_fut));
+
 			task_manager.spawn_essential_handle().spawn("aura", None, fut);
 
 			Ok(())
@@ -1440,15 +1452,6 @@ where
 		 backend| {
 			let slot_duration = cumulus_client_consensus_aura::slot_duration(&*client)?;
 
-			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
-				task_manager.spawn_handle(),
-				client.clone(),
-				transaction_pool,
-				prometheus_registry,
-				telemetry.clone(),
-			);
-			let proposer = Proposer::new(proposer_factory);
-
 			let collator_service = CollatorService::new(
 				client.clone(),
 				Arc::new(task_manager.spawn_handle()),
@@ -1458,6 +1461,25 @@ where
 
 			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let params = AuraParams {
+				relay_client: relay_chain_interface.clone(),
+				collator_key: collator_key.clone(),
+				para_id,
+				overseer_handle: overseer_handle.clone(),
+				slot_duration,
+				reinitialize: false,
+				collator_receiver: rx,
+			};
+
+			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
+				task_manager.spawn_handle(),
+				client.clone(),
+				transaction_pool,
+				prometheus_registry,
+				telemetry.clone(),
+			);
+			let proposer = Proposer::new(proposer_factory);
+
+			let slot_params = SlotParams {
 				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
 				block_import,
 				para_client: client.clone(),
@@ -1476,13 +1498,30 @@ where
 				proposer,
 				collator_service,
 				authoring_duration: Duration::from_millis(1500),
-				reinitialize: false,
-				collator_receiver: rx,
+				reinitialize: true,
+				collator_sender: tx,
 			};
 
-			let fut =
-				aura::run::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _, _>(params);
-			task_manager.spawn_essential_handle().spawn("aura", None, fut);
+			let block_builder_fut = slot_based::run_block_builder::<
+				Block,
+				<AuraId as AppCrypto>::Pair,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+			>(slot_params);
+			task_manager.spawn_essential_handle().spawn(
+				"cumulus-asset-hub-block-builder",
+				None,
+				Box::pin(block_builder_fut),
+			);
+			let collation_fut = aura::run::<Block, _>(params);
+			task_manager.spawn_essential_handle().spawn("aura", None, collation_fut);
 
 			Ok(())
 		},
@@ -1694,42 +1733,6 @@ where
 
 			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let collation_future = Box::pin({
-				let collator_key = collator_key.clone();
-				let sync_oracle = sync_oracle.clone();
-				let client = client.clone();
-				let para_id = para_id.clone();
-				let backend = backend.clone();
-				let relay_chain_interface2 = relay_chain_interface2.clone();
-				let overseer_handle = overseer_handle.clone();
-				let transaction_pool = transaction_pool.clone();
-				let telemetry = telemetry.clone();
-				let keystore = keystore.clone();
-				let block_import = block_import.clone();
-				let collator_service = CollatorService::new(
-					client.clone(),
-					Arc::new(task_manager.spawn_handle()),
-					announce_block.clone(),
-					client.clone(),
-				);
-				let collator_key2 = collator_key.clone();
-				let sync_oracle2 = sync_oracle.clone();
-				let client2 = client.clone();
-				let para_id2 = para_id.clone();
-				let backend2 = backend.clone();
-				let relay_chain_interface3 = relay_chain_interface2.clone();
-				let overseer_handle2 = overseer_handle.clone();
-				let transaction_pool2 = transaction_pool.clone();
-				let telemetry2 = telemetry.clone();
-				let keystore2 = keystore.clone();
-				let block_import2 = block_import.clone();
-				let collator_service2 = CollatorService::new(
-					client.clone(),
-					Arc::new(task_manager.spawn_handle()),
-					announce_block.clone(),
-					client.clone(),
-				);
-				let relay_chain_slot_duration2 = relay_chain_slot_duration.clone();
-
 				async move {
 					// Start collating with the `shell` runtime while waiting for an upgrade to an
 					// Aura compatible runtime.
@@ -1774,38 +1777,12 @@ where
 						},
 					};
 
-					let proposer_factory =
-						sc_basic_authorship::ProposerFactory::with_proof_recording(
-							spawner.clone(),
-							client.clone(),
-							transaction_pool.clone(),
-							None,
-							telemetry.clone(),
-						);
-					let proposer = Proposer::new(proposer_factory);
-					let client_closure = client.clone();
 					let params = AuraParams {
-						create_inherent_data_providers: move |_, ()| async move { Ok(()) },
-						block_import,
-						para_client: client.clone(),
-						para_backend: backend,
-						relay_client: relay_chain_interface2,
-						code_hash_provider: move |block_hash| {
-							client_closure
-								.code_at(block_hash)
-								.ok()
-								.map(|c| ValidationCode::from(c).hash())
-						},
-						sync_oracle,
-						keystore,
-						collator_key,
-						para_id,
-						overseer_handle,
+						relay_client: relay_chain_interface2.clone(),
+						collator_key: collator_key.clone(),
+						para_id: para_id.clone(),
+						overseer_handle: overseer_handle.clone(),
 						slot_duration: slot_duration.clone(),
-						relay_chain_slot_duration,
-						proposer,
-						collator_service,
-						authoring_duration: Duration::from_millis(1500),
 						// we need to always re-initialize for asset-hub moving to aura
 						reinitialize: true,
 						collator_receiver: rx,
@@ -1819,30 +1796,36 @@ where
 							None,
 							telemetry.clone(),
 						);
+					let collator_service = CollatorService::new(
+						client.clone(),
+						Arc::new(spawner.clone()),
+						announce_block.clone(),
+						client.clone(),
+					);
 					let proposer = Proposer::new(proposer_factory);
 					let slot_params = SlotParams {
 						create_inherent_data_providers: move |_, ()| async move { Ok(()) },
-						block_import: block_import2,
+						block_import,
 						para_client: client.clone(),
-						para_backend: backend2,
-						relay_client: relay_chain_interface3,
+						para_backend: backend,
+						relay_client: relay_chain_interface2,
 						code_hash_provider: move |block_hash| {
 							client.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
 						},
-						sync_oracle: sync_oracle2,
-						keystore: keystore2,
-						collator_key: collator_key2,
-						para_id: para_id2,
-						overseer_handle: overseer_handle2,
+						sync_oracle,
+						keystore,
+						collator_key,
+						para_id,
+						overseer_handle,
 						slot_duration,
-						relay_chain_slot_duration: relay_chain_slot_duration2,
+						relay_chain_slot_duration,
 						proposer,
-						collator_service: collator_service2,
+						collator_service,
 						authoring_duration: Duration::from_millis(1500),
 						reinitialize: true,
 						collator_sender: tx,
 					};
-					let fut = slot_based::run_block_builder::<
+					let block_builder_fut = slot_based::run_block_builder::<
 						Block,
 						<AuraId as AppCrypto>::Pair,
 						_,
@@ -1855,12 +1838,13 @@ where
 						_,
 						_,
 					>(slot_params);
-					spawner.spawn("cumulus-asset-hub-block-builder", None, Box::pin(fut));
+					spawner.spawn(
+						"cumulus-asset-hub-block-builder",
+						None,
+						Box::pin(block_builder_fut),
+					);
 
-					aura::run::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _, _>(
-						params,
-					)
-					.await
+					aura::run::<Block, _>(params).await
 				}
 			});
 
@@ -1942,10 +1926,20 @@ where
 
 			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let params = AuraParams {
+				relay_client: relay_chain_interface.clone(),
+				collator_key: collator_key.clone(),
+				para_id,
+				overseer_handle: overseer_handle.clone(),
+				slot_duration,
+				reinitialize: false,
+				collator_receiver: rx,
+			};
+
+			let slot_params = SlotParams {
 				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
 				block_import,
 				para_client: client.clone(),
-				para_backend: backend.clone(),
+				para_backend: backend,
 				relay_client: relay_chain_interface,
 				code_hash_provider: move |block_hash| {
 					client.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
@@ -1960,12 +1954,28 @@ where
 				proposer,
 				collator_service,
 				authoring_duration: Duration::from_millis(1500),
-				reinitialize: false,
-				collator_receiver: rx,
+				reinitialize: true,
+				collator_sender: tx,
 			};
-
-			let fut =
-				aura::run::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _, _>(params);
+			let block_builder_fut = slot_based::run_block_builder::<
+				Block,
+				<AuraId as AppCrypto>::Pair,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+			>(slot_params);
+			task_manager.spawn_essential_handle().spawn(
+				"cumulus-asset-hub-block-builder",
+				None,
+				Box::pin(block_builder_fut),
+			);
+			let fut = aura::run::<Block, _>(params);
 			task_manager.spawn_essential_handle().spawn("aura", None, fut);
 
 			Ok(())
@@ -2253,10 +2263,19 @@ pub async fn start_contracts_rococo_node(
 
 			let (tx, rx) = tokio::sync::mpsc::channel(100);
 			let params = AuraParams {
+				relay_client: relay_chain_interface.clone(),
+				collator_key: collator_key.clone(),
+				para_id,
+				overseer_handle: overseer_handle.clone(),
+				slot_duration,
+				reinitialize: false,
+				collator_receiver: rx,
+			};
+			let slot_params = SlotParams {
 				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
 				block_import,
 				para_client: client.clone(),
-				para_backend: backend.clone(),
+				para_backend: backend,
 				relay_client: relay_chain_interface,
 				code_hash_provider: move |block_hash| {
 					client.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
@@ -2270,13 +2289,11 @@ pub async fn start_contracts_rococo_node(
 				relay_chain_slot_duration,
 				proposer,
 				collator_service,
-				// Very limited proposal time.
 				authoring_duration: Duration::from_millis(1500),
-				reinitialize: false,
-				collator_receiver: rx,
+				reinitialize: true,
+				collator_sender: tx,
 			};
-
-			let fut = aura::run::<
+			let block_builder_fut = slot_based::run_block_builder::<
 				Block,
 				sp_consensus_aura::sr25519::AuthorityPair,
 				_,
@@ -2288,8 +2305,15 @@ pub async fn start_contracts_rococo_node(
 				_,
 				_,
 				_,
-			>(params);
-			task_manager.spawn_essential_handle().spawn("aura", None, fut);
+			>(slot_params);
+			task_manager.spawn_essential_handle().spawn(
+				"cumulus-asset-hub-block-builder",
+				None,
+				Box::pin(block_builder_fut),
+			);
+
+			let collation_fut = aura::run::<Block, _>(params);
+			task_manager.spawn_essential_handle().spawn("aura", None, collation_fut);
 
 			Ok(())
 		},

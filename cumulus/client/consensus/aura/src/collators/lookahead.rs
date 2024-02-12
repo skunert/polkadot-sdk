@@ -72,25 +72,9 @@ use crate::collator::{self as collator_util, SlotClaim};
 use super::slot_based_builder::CollatorMessage;
 
 /// Parameters for [`run`].
-pub struct Params<Block: BlockT, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS> {
-	/// Inherent data providers. Only non-consensus inherent data should be provided, i.e.
-	/// the timestamp, slot, and paras inherents should be omitted, as they are set by this
-	/// collator.
-	pub create_inherent_data_providers: CIDP,
-	/// Used to actually import blocks.
-	pub block_import: BI,
-	/// The underlying para client.
-	pub para_client: Arc<Client>,
-	/// The para client's backend, used to access the database.
-	pub para_backend: Arc<Backend>,
+pub struct Params<Block: BlockT, RClient> {
 	/// A handle to the relay-chain client.
 	pub relay_client: RClient,
-	/// A validation code hash provider, used to get the current validation code hash.
-	pub code_hash_provider: CHP,
-	/// A chain synchronization oracle.
-	pub sync_oracle: SO,
-	/// The underlying keystore, which should contain Aura consensus keys.
-	pub keystore: KeystorePtr,
 	/// The collator key used to sign collations before submitting to validators.
 	pub collator_key: CollatorPair,
 	/// The para's ID.
@@ -99,47 +83,18 @@ pub struct Params<Block: BlockT, BI, CIDP, Client, Backend, RClient, CHP, SO, Pr
 	pub overseer_handle: OverseerHandle,
 	/// The length of slots in this chain.
 	pub slot_duration: SlotDuration,
-	/// The length of slots in the relay chain.
-	pub relay_chain_slot_duration: Duration,
-	/// The underlying block proposer this should call into.
-	pub proposer: Proposer,
-	/// The generic collator service used to plug into this consensus engine.
-	pub collator_service: CS,
-	/// The amount of time to spend authoring each block.
-	pub authoring_duration: Duration,
 	/// Whether we should reinitialize the collator config (i.e. we are transitioning to aura).
 	pub reinitialize: bool,
 	pub collator_receiver: tokio::sync::mpsc::Receiver<CollatorMessage<Block>>,
 }
 
 /// Run async-backing-friendly Aura.
-pub fn run<Block, P, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>(
-	mut params: Params<Block, BI, CIDP, Client, Backend, RClient, CHP, SO, Proposer, CS>,
+pub fn run<Block, RClient>(
+	mut params: Params<Block, RClient>,
 ) -> impl Future<Output = ()> + Send + 'static
 where
 	Block: BlockT,
-	Client: ProvideRuntimeApi<Block>
-		+ BlockOf
-		+ AuxStore
-		+ HeaderBackend<Block>
-		+ BlockBackend<Block>
-		+ Send
-		+ Sync
-		+ 'static,
-	Client::Api:
-		AuraApi<Block, P::Public> + CollectCollationInfo<Block> + AuraUnincludedSegmentApi<Block>,
-	Backend: sc_client_api::Backend<Block> + 'static,
 	RClient: RelayChainInterface + Clone + 'static,
-	CIDP: CreateInherentDataProviders<Block, ()> + 'static,
-	CIDP::InherentDataProviders: Send,
-	BI: BlockImport<Block> + ParachainBlockImportMarker + Send + Sync + 'static,
-	SO: SyncOracle + Send + Sync + Clone + 'static,
-	Proposer: ProposerInterface<Block> + Send + Sync + 'static,
-	CS: CollatorServiceInterface<Block> + Send + Sync + 'static,
-	CHP: consensus_common::ValidationCodeHashProvider<Block::Hash> + Send + 'static,
-	P: Pair,
-	P::Public: AppPublic + Member + Codec,
-	P::Signature: TryFrom<Vec<u8>> + Member + Codec,
 {
 	async move {
 		cumulus_client_collator::initialize_collator_subsystems(
@@ -207,67 +162,6 @@ where
 					.await;
 			}
 		}
-	}
-}
-
-// Checks if we own the slot at the given block and whether there
-// is space in the unincluded segment.
-async fn can_build_upon<Block: BlockT, Client, P>(
-	slot: Slot,
-	timestamp: Timestamp,
-	parent_hash: Block::Hash,
-	included_block: Block::Hash,
-	client: &Client,
-	keystore: &KeystorePtr,
-) -> Option<SlotClaim<P::Public>>
-where
-	Client: ProvideRuntimeApi<Block>,
-	Client::Api: AuraApi<Block, P::Public> + AuraUnincludedSegmentApi<Block>,
-	P: Pair,
-	P::Public: Codec,
-	P::Signature: Codec,
-{
-	let runtime_api = client.runtime_api();
-	let authorities = runtime_api.authorities(parent_hash).ok()?;
-	let author_pub = aura_internal::claim_slot::<P>(slot, &authorities, keystore).await?;
-
-	// Here we lean on the property that building on an empty unincluded segment must always
-	// be legal. Skipping the runtime API query here allows us to seamlessly run this
-	// collator against chains which have not yet upgraded their runtime.
-	if parent_hash != included_block {
-		if !runtime_api.can_build_upon(parent_hash, included_block, slot).ok()? {
-			return None
-		}
-	}
-
-	Some(SlotClaim::unchecked::<P>(author_pub, slot, timestamp))
-}
-
-/// Reads allowed ancestry length parameter from the relay chain storage at the given relay parent.
-///
-/// Falls back to 0 in case of an error.
-async fn max_ancestry_lookback(
-	relay_parent: PHash,
-	relay_client: &impl RelayChainInterface,
-) -> usize {
-	match load_abridged_host_configuration(relay_parent, relay_client).await {
-		Ok(Some(config)) => config.async_backing_params.allowed_ancestry_len as usize,
-		Ok(None) => {
-			tracing::error!(
-				target: crate::LOG_TARGET,
-				"Active config is missing in relay chain storage",
-			);
-			0
-		},
-		Err(err) => {
-			tracing::error!(
-				target: crate::LOG_TARGET,
-				?err,
-				?relay_parent,
-				"Failed to read active config from relay chain client",
-			);
-			0
-		},
 	}
 }
 
