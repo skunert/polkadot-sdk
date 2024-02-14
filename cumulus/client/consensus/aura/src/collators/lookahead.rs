@@ -45,11 +45,9 @@ use polkadot_primitives::{CollatorPair, Id as ParaId};
 
 use futures::{channel::oneshot, prelude::*};
 
-use sp_blockchain::HeaderBackend;
-
 use sp_consensus_aura::SlotDuration;
 
-use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
+use sp_runtime::traits::Block as BlockT;
 
 use super::slot_based_builder::CollatorMessage;
 

@@ -960,7 +960,7 @@ pub async fn start_rococo_parachain_node(
 				spawner.clone(),
 				client.clone(),
 				transaction_pool.clone(),
-				None,
+				prometheus_registry,
 				telemetry.clone(),
 			);
 			let collator_service = CollatorService::new(

@@ -23,8 +23,19 @@ pub mod bench_utils;
 
 pub mod chain_spec;
 
+use cumulus_client_collator::service::CollatorService;
+use cumulus_client_consensus_aura::{
+	collators::{
+		lookahead::{self as aura, Params as AuraParams},
+		slot_based_builder::{self as slot_based, Params as SlotParams},
+	},
+	import_queue, ImportQueueParams,
+};
+use cumulus_client_consensus_proposer::Proposer;
+use parachains_common::AuraId;
 use runtime::AccountId;
 use sc_executor::{HeapAllocStrategy, WasmExecutor, DEFAULT_HEAP_ALLOC_STRATEGY};
+use sp_consensus_aura::sr25519::AuthorityPair;
 use std::{
 	collections::HashSet,
 	future::Future,
@@ -45,7 +56,7 @@ use cumulus_client_service::{
 	build_network, prepare_node_config, start_relay_chain_tasks, BuildNetworkParams,
 	CollatorSybilResistance, DARecoveryProfile, StartRelayChainTasksParams,
 };
-use cumulus_primitives_core::ParaId;
+use cumulus_primitives_core::{relay_chain::ValidationCode, ParaId};
 use cumulus_relay_chain_inprocess_interface::RelayChainInProcessInterface;
 use cumulus_relay_chain_interface::{RelayChainError, RelayChainInterface, RelayChainResult};
 use cumulus_relay_chain_minimal_node::{
@@ -221,8 +232,7 @@ pub fn new_partial(
 		)?;
 	let client = Arc::new(client);
 
-	let block_import =
-		ParachainBlockImport::new_with_delayed_best_block(client.clone(), backend.clone());
+	let block_import = ParachainBlockImport::new(client.clone(), backend.clone());
 
 	let registry = config.prometheus_registry();
 
@@ -234,12 +244,26 @@ pub fn new_partial(
 		client.clone(),
 	);
 
-	let import_queue = cumulus_client_consensus_relay_chain::import_queue(
-		client.clone(),
-		block_import.clone(),
-		|_, _| async { Ok(sp_timestamp::InherentDataProvider::from_system_time()) },
-		&task_manager.spawn_essential_handle(),
-		registry,
+	let slot_duration = sc_consensus_aura::slot_duration(&*client)?;
+	let import_queue = cumulus_client_consensus_aura::import_queue::<AuthorityPair, _, _, _, _, _>(
+		ImportQueueParams {
+			block_import: block_import.clone(),
+			client: client.clone(),
+			create_inherent_data_providers: move |_, ()| async move {
+				let timestamp = sp_timestamp::InherentDataProvider::from_system_time();
+
+				let slot =
+					sp_consensus_aura::inherents::InherentDataProvider::from_timestamp_and_slot_duration(
+						*timestamp,
+						slot_duration,
+					);
+
+				Ok((slot, timestamp))
+			},
+			spawner: &task_manager.spawn_essential_handle(),
+			registry: None,
+			telemetry: None,
+		},
 	)?;
 
 	let params = PartialComponents {
@@ -360,12 +384,13 @@ where
 			spawn_handle: task_manager.spawn_handle(),
 			relay_chain_interface: relay_chain_interface.clone(),
 			import_queue: params.import_queue,
-			sybil_resistance_level: CollatorSybilResistance::Unresistant, // no consensus
+			sybil_resistance_level: CollatorSybilResistance::Resistant, // no consensus
 		})
 		.await?;
 
 	let prometheus_registry = parachain_config.prometheus_registry().cloned();
 
+	let keystore = params.keystore_container.keystore();
 	let rpc_builder = {
 		let client = client.clone();
 		Box::new(move |_, _| rpc_ext_builder(client.clone()))
@@ -377,7 +402,7 @@ where
 		transaction_pool: transaction_pool.clone(),
 		task_manager: &mut task_manager,
 		config: parachain_config,
-		keystore: params.keystore_container.keystore(),
+		keystore: keystore.clone(),
 		backend: backend.clone(),
 		network: network.clone(),
 		sync_service: sync_service.clone(),
@@ -394,8 +419,6 @@ where
 	let announce_block = wrap_announce_block
 		.map(|w| (w)(announce_block.clone()))
 		.unwrap_or_else(|| announce_block);
-
-	let relay_chain_interface_for_closure = relay_chain_interface.clone();
 
 	let overseer_handle = relay_chain_interface
 		.overseer_handle()
@@ -427,59 +450,94 @@ where
 	})?;
 
 	if let Some(collator_key) = collator_key {
-		let parachain_consensus: Box<dyn ParachainConsensus<Block>> = match consensus {
-			Consensus::RelayChain => {
-				let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
-					task_manager.spawn_handle(),
-					client.clone(),
-					transaction_pool.clone(),
-					prometheus_registry.as_ref(),
-					None,
-				);
-				let relay_chain_interface2 = relay_chain_interface_for_closure.clone();
-				Box::new(cumulus_client_consensus_relay_chain::RelayChainConsensus::new(
-					para_id,
-					proposer_factory,
-					move |_, (relay_parent, validation_data)| {
-						let relay_chain_interface = relay_chain_interface_for_closure.clone();
-						async move {
-							let parachain_inherent =
-							cumulus_client_parachain_inherent::ParachainInherentDataProvider::create_at(
-								relay_parent,
-								&relay_chain_interface,
-								&validation_data,
-								para_id,
-							).await;
+		if let Consensus::Null = consensus {
+			#[allow(deprecated)]
+			old_consensus::start_collator(old_consensus::StartCollatorParams {
+				block_status: client.clone(),
+				announce_block,
+				runtime_api: client.clone(),
+				spawner: task_manager.spawn_handle(),
+				para_id,
+				parachain_consensus: Box::new(NullConsensus) as Box<_>,
+				key: collator_key,
+				overseer_handle,
+			})
+			.await;
+		} else {
+			// Aura goes here
+			let slot_duration = cumulus_client_consensus_aura::slot_duration(&*client)?;
 
-							let time = sp_timestamp::InherentDataProvider::from_system_time();
+			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
+				task_manager.spawn_handle(),
+				client.clone(),
+				transaction_pool.clone(),
+				prometheus_registry.as_ref(),
+				None,
+			);
+			let proposer = Proposer::new(proposer_factory);
 
-							let parachain_inherent = parachain_inherent.ok_or_else(|| {
-								Box::<dyn std::error::Error + Send + Sync>::from(String::from(
-									"error",
-								))
-							})?;
-							Ok((time, parachain_inherent))
-						}
-					},
-					block_import,
-					relay_chain_interface2,
-				))
-			},
-			Consensus::Null => Box::new(NullConsensus),
-		};
+			let collator_service = CollatorService::new(
+				client.clone(),
+				Arc::new(task_manager.spawn_handle()),
+				announce_block,
+				client.clone(),
+			);
 
-		#[allow(deprecated)]
-		old_consensus::start_collator(old_consensus::StartCollatorParams {
-			block_status: client.clone(),
-			announce_block,
-			runtime_api: client.clone(),
-			spawner: task_manager.spawn_handle(),
-			para_id,
-			parachain_consensus,
-			key: collator_key,
-			overseer_handle,
-		})
-		.await;
+			let (tx, rx) = tokio::sync::mpsc::channel(100);
+			let params = AuraParams {
+				relay_client: relay_chain_interface.clone(),
+				collator_key: collator_key.clone(),
+				para_id,
+				overseer_handle: overseer_handle.clone(),
+				slot_duration,
+				reinitialize: false,
+				collator_receiver: rx,
+			};
+			let client_for_slot = client.clone();
+			let slot_params = SlotParams {
+				create_inherent_data_providers: move |_, ()| async move { Ok(()) },
+				block_import,
+				para_client: client.clone(),
+				para_backend: backend.clone(),
+				relay_client: relay_chain_interface,
+				code_hash_provider: move |block_hash| {
+					client_for_slot.code_at(block_hash).ok().map(|c| ValidationCode::from(c).hash())
+				},
+				sync_oracle: sync_service.clone(),
+				keystore,
+				collator_key,
+				para_id,
+				overseer_handle,
+				slot_duration,
+				relay_chain_slot_duration,
+				proposer,
+				collator_service,
+				authoring_duration: Duration::from_millis(1500),
+				reinitialize: true,
+				collator_sender: tx,
+			};
+			let block_builder_fut = slot_based::run_block_builder::<
+				Block,
+				sp_consensus_aura::sr25519::AuthorityPair,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+				_,
+			>(slot_params);
+			task_manager.spawn_essential_handle().spawn(
+				"cumulus-asset-hub-block-builder",
+				None,
+				Box::pin(block_builder_fut),
+			);
+
+			let collation_fut = aura::run::<Block, _>(params);
+			task_manager.spawn_essential_handle().spawn("aura", None, collation_fut);
+		}
 	}
 
 	start_network.start_network();
@@ -508,8 +566,8 @@ pub struct TestNode {
 
 #[allow(missing_docs)]
 pub enum Consensus {
-	/// Use the relay-chain provided consensus.
-	RelayChain,
+	/// Use Aura consensus.
+	Aura,
 	/// Use the null consensus that will never produce any block.
 	Null,
 }
@@ -551,7 +609,7 @@ impl TestNodeBuilder {
 			wrap_announce_block: None,
 			storage_update_func_parachain: None,
 			storage_update_func_relay_chain: None,
-			consensus: Consensus::RelayChain,
+			consensus: Consensus::Aura,
 			endowed_accounts: Default::default(),
 			relay_chain_mode: RelayChainMode::Embedded,
 			record_proof_during_import: true,

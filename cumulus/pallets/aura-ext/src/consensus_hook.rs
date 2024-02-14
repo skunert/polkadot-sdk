@@ -62,6 +62,7 @@ where
 			u64::from(RELAY_CHAIN_SLOT_DURATION_MILLIS).saturating_mul(*relay_chain_slot);
 
 		let para_slot_duration = SlotDuration::from_millis(Aura::<T>::slot_duration().into());
+		log::info!(target: "skunert", "para_slot_duration: {:?}, relay_chain_timestamp: {:?}", para_slot_duration, relay_chain_timestamp);
 		let para_slot_from_relay =
 			Slot::from_timestamp(relay_chain_timestamp.into(), para_slot_duration);
 

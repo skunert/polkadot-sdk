@@ -3,6 +3,6 @@ Network: ./0003-full_node_catching_up.toml
 Creds: config
 
 alice: parachain 2000 is registered within 225 seconds
-dave: reports block height is at least 7 within 250 seconds
-eve: reports block height is at least 7 within 250 seconds
-ferdie: reports block height is at least 7 within 250 seconds
+dave: reports block height is at least 7 within 300 seconds
+eve: reports block height is at least 7 within 10 seconds
+ferdie: reports block height is at least 7 within 10 seconds
