@@ -69,11 +69,15 @@ use substrate_prometheus_endpoint::Registry;
 use polkadot_primitives::CollatorPair;
 
 #[cfg(not(feature = "runtime-benchmarks"))]
-type HostFunctions = sp_io::SubstrateHostFunctions;
+type HostFunctions =
+	(sp_io::SubstrateHostFunctions, cumulus_client_service::storage_proof_size::HostFunctions);
 
 #[cfg(feature = "runtime-benchmarks")]
-type HostFunctions =
-	(sp_io::SubstrateHostFunctions, frame_benchmarking::benchmarking::HostFunctions);
+type HostFunctions = (
+	sp_io::SubstrateHostFunctions,
+	cumulus_client_service::storage_proof_size::HostFunctions,
+	frame_benchmarking::benchmarking::HostFunctions,
+);
 
 type ParachainClient<RuntimeApi> = TFullClient<Block, RuntimeApi, WasmExecutor<HostFunctions>>;
 
@@ -275,10 +279,11 @@ where
 		.build();
 
 	let (client, backend, keystore_container, task_manager) =
-		sc_service::new_full_parts::<Block, RuntimeApi, _>(
+		sc_service::new_full_parts_record_import::<Block, RuntimeApi, _>(
 			config,
 			telemetry.as_ref().map(|(_, telemetry)| telemetry.handle()),
 			executor,
+			true,
 		)?;
 	let client = Arc::new(client);
 
@@ -1493,7 +1498,6 @@ where
 				collator_key,
 				para_id,
 				overseer_handle,
-				slot_duration,
 				relay_chain_slot_duration,
 				proposer,
 				collator_service,
@@ -1906,8 +1910,6 @@ where
 		 overseer_handle,
 		 announce_block,
 		 backend| {
-			let slot_duration = cumulus_client_consensus_aura::slot_duration(&*client)?;
-
 			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
 				task_manager.spawn_handle(),
 				client.clone(),
@@ -1949,7 +1951,6 @@ where
 				collator_key,
 				para_id,
 				overseer_handle,
-				slot_duration,
 				relay_chain_slot_duration,
 				proposer,
 				collator_service,
@@ -2243,8 +2244,6 @@ pub async fn start_contracts_rococo_node(
 		 overseer_handle,
 		 announce_block,
 		 backend| {
-			let slot_duration = cumulus_client_consensus_aura::slot_duration(&*client)?;
-
 			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
 				task_manager.spawn_handle(),
 				client.clone(),
