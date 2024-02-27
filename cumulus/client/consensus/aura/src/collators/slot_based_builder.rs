@@ -52,7 +52,7 @@ use polkadot_primitives::{
 	ValidationCodeHash,
 };
 
-use futures::{channel::oneshot, prelude::*};
+use futures::channel::oneshot;
 use sc_client_api::{backend::AuxStore, BlockBackend, BlockOf};
 use sc_consensus::BlockImport;
 use sc_consensus_aura::standalone as aura_internal;
