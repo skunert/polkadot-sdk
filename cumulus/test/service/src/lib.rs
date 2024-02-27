@@ -29,10 +29,9 @@ use cumulus_client_consensus_aura::{
 		lookahead::{self as aura, Params as AuraParams},
 		slot_based_builder::{self as slot_based, Params as SlotParams},
 	},
-	import_queue, ImportQueueParams,
+	ImportQueueParams,
 };
 use cumulus_client_consensus_proposer::Proposer;
-use parachains_common::AuraId;
 use runtime::AccountId;
 use sc_executor::{HeapAllocStrategy, WasmExecutor, DEFAULT_HEAP_ALLOC_STRATEGY};
 use sp_consensus_aura::sr25519::AuthorityPair;
@@ -119,27 +118,10 @@ impl ParachainConsensus<Block> for NullConsensus {
 /// The signature of the announce block fn.
 pub type AnnounceBlockFn = Arc<dyn Fn(Hash, Option<Vec<u8>>) + Send + Sync>;
 
-/// Native executor instance.
-pub struct RuntimeExecutor;
-
-impl sc_executor::NativeExecutionDispatch for RuntimeExecutor {
-	type ExtendHostFunctions = cumulus_client_service::storage_proof_size::HostFunctions;
-
-	fn dispatch(method: &str, data: &[u8]) -> Option<Vec<u8>> {
-		cumulus_test_runtime::api::dispatch(method, data)
-	}
-
-	fn native_version() -> sc_executor::NativeVersion {
-		cumulus_test_runtime::native_version()
-	}
-}
-
+type HostFunctions =
+	(sp_io::SubstrateHostFunctions, cumulus_client_service::storage_proof_size::HostFunctions);
 /// The client type being used by the test service.
-pub type Client = TFullClient<
-	runtime::NodeBlock,
-	runtime::RuntimeApi,
-	sc_executor::NativeElseWasmExecutor<RuntimeExecutor>,
->;
+pub type Client = TFullClient<runtime::NodeBlock, runtime::RuntimeApi, WasmExecutor<HostFunctions>>;
 
 /// The backend type being used by the test service.
 pub type Backend = TFullBackend<Block>;
@@ -212,16 +194,13 @@ pub fn new_partial(
 		.default_heap_pages
 		.map_or(DEFAULT_HEAP_ALLOC_STRATEGY, |h| HeapAllocStrategy::Static { extra_pages: h as _ });
 
-	let wasm = WasmExecutor::builder()
+	let executor = WasmExecutor::builder()
 		.with_execution_method(config.wasm_method)
 		.with_onchain_heap_alloc_strategy(heap_pages)
 		.with_offchain_heap_alloc_strategy(heap_pages)
 		.with_max_runtime_instances(config.max_runtime_instances)
 		.with_runtime_cache_size(config.runtime_cache_size)
 		.build();
-
-	let executor =
-		sc_executor::NativeElseWasmExecutor::<RuntimeExecutor>::new_with_wasm_executor(wasm);
 
 	let (client, backend, keystore_container, task_manager) =
 		sc_service::new_full_parts_record_import::<Block, RuntimeApi, _>(
