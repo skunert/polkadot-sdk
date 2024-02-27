@@ -114,6 +114,10 @@ impl<
 			return false
 		}
 
+		// TODO skunert:  This logic here needs to change.
+		// It checks that we have not authored more than `V + 1` blocks in the slot.
+		// As a slot however, we take the parachain slot here. Velocity should
+		// be measured in relation to the relay chain slot.
 		if last_slot == new_slot {
 			authored_so_far < velocity + 1
 		} else {
