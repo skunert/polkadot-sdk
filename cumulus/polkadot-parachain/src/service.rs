@@ -1499,6 +1499,7 @@ where
 				para_id,
 				overseer_handle,
 				relay_chain_slot_duration,
+				slot_duration,
 				proposer,
 				collator_service,
 				authoring_duration: Duration::from_millis(1500),
@@ -1910,6 +1911,7 @@ where
 		 overseer_handle,
 		 announce_block,
 		 backend| {
+			let slot_duration = cumulus_client_consensus_aura::slot_duration(&*client)?;
 			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
 				task_manager.spawn_handle(),
 				client.clone(),
@@ -1949,6 +1951,7 @@ where
 				sync_oracle,
 				keystore,
 				collator_key,
+				slot_duration,
 				para_id,
 				overseer_handle,
 				relay_chain_slot_duration,
@@ -2244,6 +2247,8 @@ pub async fn start_contracts_rococo_node(
 		 overseer_handle,
 		 announce_block,
 		 backend| {
+			let slot_duration = cumulus_client_consensus_aura::slot_duration(&*client)?;
+
 			let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
 				task_manager.spawn_handle(),
 				client.clone(),
