@@ -260,6 +260,7 @@ pub async fn run_block_builder<
 		mut overseer_handle,
 		..
 	} = params;
+
 	let slot_timer = SlotTimer::new(slot_duration);
 	let mut collator = {
 		let params = collator_util::Params {
@@ -275,7 +276,7 @@ pub async fn run_block_builder<
 		collator_util::Collator::<Block, P, _, _, _, _, _>::new(params)
 	};
 
-	tracing::info!(target: "skunert", "Passing through here on the worker");
+	tracing::info!(target: "skunert", "Starting builder loop, slot duration: {:?}", slot_duration);
 	loop {
 		// We wait here until the next slot arrives.
 		let slot = slot_timer.wait_until_next_slot_with_drift(Duration::from_millis(500)).await;
