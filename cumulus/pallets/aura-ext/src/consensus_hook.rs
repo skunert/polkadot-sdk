@@ -62,12 +62,20 @@ where
 			u64::from(RELAY_CHAIN_SLOT_DURATION_MILLIS).saturating_mul(*relay_chain_slot);
 
 		let para_slot_duration = SlotDuration::from_millis(Aura::<T>::slot_duration().into());
-		log::info!(target: "skunert", "para_slot_duration: {:?}, relay_chain_timestamp: {:?}", para_slot_duration, relay_chain_timestamp);
 		let para_slot_from_relay =
 			Slot::from_timestamp(relay_chain_timestamp.into(), para_slot_duration);
 
+		let expected_para_blocks_per_relay =
+			RELAY_CHAIN_SLOT_DURATION_MILLIS as u64 / para_slot_duration.as_millis();
+		log::info!(target: "skunert", "authored: {authored} relay_chain_slot: {relay_chain_slot:?}, para_slot_from_relay:{para_slot_from_relay:?}, expected_para_blocks_per_relay: {:?}",  expected_para_blocks_per_relay);
 		// Perform checks.
-		assert_eq!(slot, para_slot_from_relay, "slot number mismatch");
+		if slot > para_slot_from_relay + expected_para_blocks_per_relay {
+			panic!(
+				"Parachain slot is too far in the future: {:?} > {:?} + {:?}",
+				slot, para_slot_from_relay, expected_para_blocks_per_relay
+			);
+		}
+
 		if authored > velocity + 1 {
 			panic!("authored blocks limit is reached for the slot")
 		}

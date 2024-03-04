@@ -371,7 +371,11 @@ pub async fn run_block_builder<
 		};
 
 		let slot_claim = match can_build_upon(parent_hash).await {
-			None => break,
+			None => {
+				tracing::info!(target: "skunert", "Runtime reports that we cannot build upon this block. Skipping.");
+				continue
+			},
+
 			Some(c) => c,
 		};
 
