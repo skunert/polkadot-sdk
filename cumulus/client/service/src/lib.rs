@@ -48,6 +48,7 @@ use sc_telemetry::{log, TelemetryWorkerHandle};
 use sc_utils::mpsc::TracingUnboundedSender;
 use sp_api::ProvideRuntimeApi;
 use sp_blockchain::{HeaderBackend, HeaderMetadata};
+use sp_consensus::block_validation::BlockAnnounceValidator;
 use sp_core::{traits::SpawnNamed, Decode};
 use sp_runtime::traits::{Block as BlockT, BlockIdTo, Header};
 use std::{sync::Arc, time::Duration};
@@ -480,12 +481,12 @@ where
 	let block_announce_validator = match sybil_resistance_level {
 		CollatorSybilResistance::Resistant => {
 			let block_announce_validator = AssumeSybilResistance::allow_seconded_messages();
-			Box::new(block_announce_validator) as Box<_>
+			Box::new(block_announce_validator) as Box<dyn BlockAnnounceValidator<_>>
 		},
 		CollatorSybilResistance::Unresistant => {
 			let block_announce_validator =
 				RequireSecondedInBlockAnnounce::new(relay_chain_interface, para_id);
-			Box::new(block_announce_validator) as Box<_>
+			Box::new(block_announce_validator) as Box<dyn BlockAnnounceValidator<_>>
 		},
 	};
 	let metrics = Network::register_notification_metrics(
@@ -499,7 +500,7 @@ where
 		transaction_pool,
 		spawn_handle,
 		import_queue,
-		block_announce_validator_builder: Some(Box::new(move |_| block_announce_validator)),
+		block_announce_validator: Some(Box::new(block_announce_validator)),
 		warp_sync_params,
 		block_relay: None,
 		metrics,

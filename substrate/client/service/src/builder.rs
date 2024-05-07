@@ -753,8 +753,7 @@ pub struct BuildNetworkParams<
 	/// An import queue.
 	pub import_queue: TImpQu,
 	/// A block announce validator builder.
-	pub block_announce_validator_builder:
-		Option<Box<dyn FnOnce(Arc<TCl>) -> Box<dyn BlockAnnounceValidator<TBl> + Send> + Send>>,
+	pub block_announce_validator: Option<Box<dyn BlockAnnounceValidator<TBl> + Send + Sync>>,
 	/// Optional warp sync params.
 	pub warp_sync_params: Option<WarpSyncParams<TBl>>,
 	/// User specified block relay params. If not specified, the default
@@ -799,7 +798,7 @@ where
 		transaction_pool,
 		spawn_handle,
 		import_queue,
-		block_announce_validator_builder,
+		block_announce_validator,
 		warp_sync_params,
 		block_relay,
 		metrics,
@@ -825,8 +824,9 @@ where
 		.flatten()
 		.expect("Genesis block exists; qed");
 
-	let block_announce_validator = if let Some(f) = block_announce_validator_builder {
-		f(client.clone())
+	let block_announce_validator = if let Some(block_announce_validator) = block_announce_validator
+	{
+		block_announce_validator
 	} else {
 		Box::new(DefaultBlockAnnounceValidator)
 	};
