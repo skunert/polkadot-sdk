@@ -661,7 +661,6 @@ where
 	R::Api: BeefyApi<B, AuthorityId>,
 {
 	info!(target: LOG_TARGET, "🥩 BEEFY gadget waiting for BEEFY pallet to become available...");
-	info!(target: LOG_TARGET, "🥩 finality_stream_length: {}", finality.len());
 	loop {
 		let notif = finality.next().await.ok_or_else(|| {
 			let err_msg = "🥩 Finality stream has unexpectedly terminated.".into();
@@ -669,6 +668,7 @@ where
 			Error::Backend(err_msg)
 		})?;
 		let at = notif.header.hash();
+		info!(target: LOG_TARGET, "🥩 finality_stream notification: {}", notif.hash);
 		if let Some(start) = runtime.runtime_api().beefy_genesis(at).ok().flatten() {
 			if *notif.header.number() >= start {
 				// Beefy pallet available, return header for best grandpa at the time.
