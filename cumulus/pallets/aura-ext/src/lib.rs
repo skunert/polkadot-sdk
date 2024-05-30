@@ -153,25 +153,6 @@ where
 			}
 		});
 
-		let seal = seal.expect("Could not find an AuRa seal digest!");
-
-		let author = Aura::<T>::find_author(
-			header.digest().logs().iter().filter_map(|d| d.as_pre_runtime()),
-		)
-		.expect("Could not find AuRa author index!");
-
-		let pre_hash = header.hash();
-
-		if !authorities
-			.get(author as usize)
-			.unwrap_or_else(|| {
-				panic!("Invalid AuRa author index {} for authorities: {:?}", author, authorities)
-			})
-			.verify(&pre_hash, &seal)
-		{
-			panic!("Invalid AuRa seal");
-		}
-
 		I::execute_block(Block::new(header, extrinsics));
 	}
 }
