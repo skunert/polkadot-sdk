@@ -174,7 +174,7 @@ where
 
 		E::execute_block(block);
 
-		let new_validation_code = None;
+		let new_validation_code = None::<polkadot_parachain_primitives::primitives::ValidationCode>;
 		let upward_messages = Default::default();
 		let processed_downward_messages = Default::default();
 		let horizontal_messages = Default::default();
