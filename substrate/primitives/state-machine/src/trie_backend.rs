@@ -232,6 +232,10 @@ where
 	pub fn new_with_cache(storage: S, root: H::Out, cache: C) -> Self {
 		Self { storage, root, recorder: None, cache: Some(cache) }
 	}
+
+	pub fn new_with_recorder(storage: S, root: H::Out, recorder: R) -> Self {
+		Self { storage, root, recorder: Some(recorder), cache: None }
+	}
 	/// Wrap the given [`TrieBackend`].
 	///
 	/// This can be used for example if all accesses to the trie should

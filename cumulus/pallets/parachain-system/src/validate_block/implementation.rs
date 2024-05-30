@@ -40,7 +40,7 @@ use trie_recorder::SizeOnlyRecorderProvider;
 type TrieBackend<B> = sp_state_machine::TrieBackend<
 	MemoryDB<HashingFor<B>>,
 	HashingFor<B>,
-	trie_cache::CacheProvider<HashingFor<B>>,
+	sp_state_machine::UnimplementedCacheProvider<HashingFor<B>>,
 	SizeOnlyRecorderProvider<HashingFor<B>>,
 >;
 
@@ -97,7 +97,6 @@ where
 	B::Extrinsic: ExtrinsicCall,
 	<B::Extrinsic as Extrinsic>::Call: IsSubType<crate::Call<PSC>>,
 {
-	assert!(false, "Ja moin meine kaelber");
 	let block_data = codec::decode_from_bytes::<ParachainBlockData<B>>(block_data)
 		.expect("Invalid parachain block data");
 
@@ -111,13 +110,6 @@ where
 
 	let inherent_data = extract_parachain_inherent_data(&block);
 
-	validate_validation_data(
-		&inherent_data.validation_data,
-		relay_parent_number,
-		relay_parent_storage_root,
-		parent_head,
-	);
-
 	// Create the db
 	let db = match storage_proof.to_memory_db(Some(parent_header.state_root())) {
 		Ok((db, _)) => db,
@@ -127,15 +119,13 @@ where
 	sp_std::mem::drop(storage_proof);
 
 	let mut recorder = SizeOnlyRecorderProvider::new();
-	let cache_provider = trie_cache::CacheProvider::new();
 	// We use the storage root of the `parent_head` to ensure that it is the correct root.
 	// This is already being done above while creating the in-memory db, but let's be paranoid!!
-	let backend = sp_state_machine::TrieBackendBuilder::new_with_cache(
+	let backend = sp_state_machine::TrieBackendBuilder::new_with_recorder(
 		db,
 		*parent_header.state_root(),
-		cache_provider,
+		recorder.clone(),
 	)
-	.with_recorder(recorder.clone())
 	.build();
 
 	let _guard = (
@@ -178,27 +168,6 @@ where
 		cumulus_primitives_proof_size_hostfunction::storage_proof_size::host_storage_proof_size
 			.replace_implementation(host_storage_proof_size),
 	);
-
-	run_with_externalities_and_recorder::<B, _, _>(&backend, &mut recorder, || {
-		let relay_chain_proof = crate::RelayChainStateProof::new(
-			PSC::SelfParaId::get(),
-			inherent_data.validation_data.relay_parent_storage_root,
-			inherent_data.relay_chain_state.clone(),
-		)
-		.expect("Invalid relay chain state proof");
-
-		let res = CI::check_inherents(&block, &relay_chain_proof);
-
-		if !res.ok() {
-			if log::log_enabled!(log::Level::Error) {
-				res.into_errors().for_each(|e| {
-					log::error!("Checking inherent with identifier `{:?}` failed", e.0)
-				});
-			}
-
-			panic!("Checking inherents failed");
-		}
-	});
 
 	run_with_externalities_and_recorder::<B, _, _>(&backend, &mut recorder, || {
 		let head_data = HeadData(block.header().encode());

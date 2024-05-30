@@ -42,6 +42,8 @@ pub use trie_backend::TrieCacheProvider;
 
 #[cfg(feature = "std")]
 pub use std_reexport::*;
+#[cfg(not(feature = "std"))]
+pub use trie_backend::UnimplementedCacheProvider;
 
 #[cfg(feature = "std")]
 pub use execution::*;
