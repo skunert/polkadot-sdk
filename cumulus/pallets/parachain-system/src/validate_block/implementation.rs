@@ -174,22 +174,11 @@ where
 
 		E::execute_block(block);
 
-		let new_validation_code = crate::NewValidationCode::<PSC>::get();
-		let upward_messages = crate::UpwardMessages::<PSC>::get().try_into().expect(
-			"Number of upward messages should not be greater than `MAX_UPWARD_MESSAGE_NUM`",
-		);
-		let processed_downward_messages = crate::ProcessedDownwardMessages::<PSC>::get();
-		let horizontal_messages = crate::HrmpOutboundMessages::<PSC>::get().try_into().expect(
-			"Number of horizontal messages should not be greater than `MAX_HORIZONTAL_MESSAGE_NUM`",
-		);
-		let hrmp_watermark = crate::HrmpWatermark::<PSC>::get();
-
-		let head_data =
-			if let Some(custom_head_data) = crate::CustomValidationHeadData::<PSC>::get() {
-				HeadData(custom_head_data)
-			} else {
-				head_data
-			};
+		let new_validation_code = None;
+		let upward_messages = Default::default();
+		let processed_downward_messages = Default::default();
+		let horizontal_messages = Default::default();
+		let hrmp_watermark = 0;
 
 		ValidationResult {
 			head_data,
