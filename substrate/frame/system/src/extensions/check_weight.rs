@@ -106,7 +106,7 @@ where
 		let all_weight = Pallet::<T>::block_weight();
 		let maximum_weight = T::BlockWeights::get();
 		let next_weight =
-			calculate_consumed_weight::<T::RuntimeCall>(&maximum_weight, all_weight, info)?;
+			calculate_consumed_weight::<T::RuntimeCall>(&maximum_weight, all_weight, info, len)?;
 		check_combined_proof_size::<T::RuntimeCall>(info, &maximum_weight, next_len, &next_weight)?;
 		Self::check_extrinsic_weight(info)?;
 
@@ -167,12 +167,15 @@ pub fn calculate_consumed_weight<Call>(
 	maximum_weight: &BlockWeights,
 	mut all_weight: crate::ConsumedWeight,
 	info: &DispatchInfoOf<Call>,
+	len: usize,
 ) -> Result<crate::ConsumedWeight, TransactionValidityError>
 where
 	Call: Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 {
-	let extrinsic_weight =
-		info.weight.saturating_add(maximum_weight.get(info.class).base_extrinsic);
+	let extrinsic_weight = info
+		.weight
+		.saturating_add(maximum_weight.get(info.class).base_extrinsic)
+		.saturating_add(Weight::from_parts(0, len.try_into().expect("Should work")));
 	let limit_per_class = maximum_weight.get(info.class);
 
 	// add the weight. If class is unlimited, use saturating add instead of checked one.

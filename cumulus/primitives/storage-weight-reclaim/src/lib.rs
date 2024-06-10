@@ -288,6 +288,47 @@ mod tests {
 	}
 
 	#[test]
+	fn check_weight_pre_dispatch_works_with_xt_len() {
+		sp_tracing::init_for_tests();
+		// The real cost will be 100 bytes of storage size
+		let mut test_ext = setup_test_externalities(&[0, 100]);
+
+		test_ext.execute_with(|| {
+			set_current_storage_weight(1000);
+
+			// Storage proof size is benchmarked to be 500
+			let info = DispatchInfo { weight: Weight::from_parts(0, 500), ..Default::default() };
+			let post_info = PostDispatchInfo::default();
+
+			// Extrinsic length is 40
+			let len = 40usize;
+
+			// This will add 500 to the proof size + 40 for the extrinsic length
+			assert_ok!(CheckWeight::<Test>::new().pre_dispatch(&ALICE, CALL, &info, len));
+
+			// Initial blockweight storage item was 1000 + 540 = 1540 now
+			assert_eq!(BlockWeight::<Test>::get().total().proof_size(), 1540);
+			let pre = StorageWeightReclaim::<Test>(PhantomData)
+				.pre_dispatch(&ALICE, CALL, &info, len)
+				.unwrap();
+			assert_eq!(pre, Some(0));
+
+			assert_ok!(CheckWeight::<Test>::post_dispatch(None, &info, &post_info, 0, &Ok(())));
+
+			// We expect a refund of 400 because we have benchmarked 500 and consumed 100
+			assert_ok!(StorageWeightReclaim::<Test>::post_dispatch(
+				Some(pre),
+				&info,
+				&post_info,
+				len,
+				&Ok(())
+			));
+
+			assert_eq!(BlockWeight::<Test>::get().total().proof_size(), 1140);
+		})
+	}
+
+	#[test]
 	fn does_nothing_without_extension() {
 		let mut test_ext = new_test_ext();
 

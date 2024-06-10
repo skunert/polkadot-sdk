@@ -23,6 +23,7 @@ sp-std = { path = "../../../substrate/primitives/std", default-features = false 
 cumulus-primitives-core = { path = "../core", default-features = false }
 cumulus-primitives-proof-size-hostfunction = { path = "../proof-size-hostfunction", default-features = false }
 docify = "0.2.8"
+sp-tracing = { version = "16.0.0", path = "../../../substrate/primitives/tracing", default-features = false }
 
 [dev-dependencies]
 sp-trie = { path = "../../../substrate/primitives/trie", default-features = false }
@@ -43,4 +44,5 @@ std = [
 	"sp-runtime/std",
 	"sp-std/std",
 	"sp-trie/std",
+	"sp-tracing/std",
 ]
