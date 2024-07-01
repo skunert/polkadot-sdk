@@ -754,7 +754,8 @@ where
 						proposer,
 						collator_service,
 						authoring_duration: Duration::from_millis(2000),
-						reinitialize: false,
+						reinitialize: true, /* we need to always re-initialize for asset-hub
+						                     * moving to aura */
 						slot_drift: Duration::from_secs(1),
 					};
 
