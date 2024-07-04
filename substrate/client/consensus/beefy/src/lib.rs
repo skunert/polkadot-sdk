@@ -35,7 +35,7 @@ use futures::{stream::Fuse, FutureExt, StreamExt};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use prometheus_endpoint::Registry;
-use sc_client_api::{Backend, BlockBackend, BlockchainEvents, FinalityNotifications, Finalizer};
+use sc_client_api::{Backend, BlockBackend, BlockchainEvents, Finalizer};
 use sc_consensus::BlockImport;
 use sc_network::{NetworkRequest, NotificationService, ProtocolName};
 use sc_network_gossip::{GossipEngine, Network as GossipNetwork, Syncing as GossipSyncing};
@@ -87,6 +87,8 @@ const LOG_TARGET: &str = "beefy";
 
 const HEADER_SYNC_DELAY: Duration = Duration::from_secs(60);
 
+pub type FinalityNotifications<Block> =
+	sc_utils::mpsc::TracingUnboundedReceiver<StrippedFinalityNotification<Block>>;
 /// A convenience BEEFY client trait that defines all the type bounds a BEEFY client
 /// has to satisfy. Ideally that should actually be a trait alias. Unfortunately as
 /// of today, Rust does not allow a type alias to be used as a trait bound. Tracking
@@ -484,6 +486,27 @@ where
 	}
 }
 
+struct StrippedFinalityNotification<B: Block> {
+	/// Finalized block header hash.
+	pub hash: B::Hash,
+	/// Finalized block header.
+	pub header: B::Header,
+	/// Path from the old finalized to new finalized parent (implicitly finalized blocks).
+	///
+	/// This maps to the range `(old_finalized, new_finalized)`.
+	pub tree_route: Arc<[B::Hash]>,
+}
+
+impl<B: Block> From<sc_client_api::FinalityNotification<B>> for StrippedFinalityNotification<B> {
+	fn from(value: sc_client_api::FinalityNotification<B>) -> Self {
+		StrippedFinalityNotification {
+			hash: value.hash,
+			header: value.header,
+			tree_route: value.tree_route,
+		}
+	}
+}
+
 /// Start the BEEFY gadget.
 ///
 /// This is a thin shim around running and awaiting a BEEFY worker.
@@ -529,6 +552,23 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 	// reuse the streams, so we don't miss notifications while waiting for pallet to be available.
 	let mut finality_notifications = client.finality_notification_stream().fuse();
 	let mut block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
+
+	let (mut transformer, mut finality_notifications) = {
+		let (tx, rx) = sc_utils::mpsc::tracing_unbounded::<StrippedFinalityNotification<B>>(
+			"fin-transformer",
+			10000,
+		);
+		(
+			Box::pin(async move {
+				while let Some(notif) = finality_notifications.next().await {
+					info!(target: "skunert", "Transforming grandpa notification for #{} ({})", notif.header.number(), notif.hash);
+					tx.unbounded_send(notif.into()).expect("works");
+				}
+				error!(target: "skunert", "Transformer terminated!");
+			}.fuse()),
+			rx.fuse(),
+		)
+	};
 
 	let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
 	// Default votes filter is to discard everything.
@@ -581,6 +621,10 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 			// Pump gossip engine.
 			_ = &mut beefy_comms.gossip_engine => {
 				error!(target: LOG_TARGET, "🥩 Gossip engine has unexpectedly terminated.");
+				return
+			},
+			_ = transformer => {
+				error!(target: LOG_TARGET, "🥩 Notification transformer unexpectedly terminated.");
 				return
 			}
 		};

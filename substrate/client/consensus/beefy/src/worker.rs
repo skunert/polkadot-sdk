@@ -29,14 +29,14 @@ use crate::{
 	metric_inc, metric_set,
 	metrics::VoterMetrics,
 	round::{Rounds, VoteImportResult},
-	BeefyComms, BeefyVoterLinks, LOG_TARGET,
+	BeefyComms, BeefyVoterLinks, StrippedFinalityNotification, LOG_TARGET,
 };
 use sp_application_crypto::RuntimeAppPublic;
 
 use codec::{Codec, Decode, DecodeAll, Encode};
 use futures::{stream::Fuse, FutureExt, StreamExt};
 use log::{debug, error, info, trace, warn};
-use sc_client_api::{Backend, FinalityNotification, FinalityNotifications, HeaderBackend};
+use sc_client_api::{Backend, FinalityNotification, HeaderBackend};
 use sc_utils::notification::NotificationReceiver;
 use sp_api::ProvideRuntimeApi;
 use sp_arithmetic::traits::{AtLeast32Bit, Saturating};
@@ -447,7 +447,7 @@ where
 
 	fn handle_finality_notification(
 		&mut self,
-		notification: &FinalityNotification<B>,
+		notification: &StrippedFinalityNotification<B>,
 	) -> Result<(), Error> {
 		let header = &notification.header;
 		debug!(
@@ -463,7 +463,13 @@ where
 			.beefy_genesis(header.hash())
 			.ok()
 			.flatten()
-			.filter(|genesis| *genesis == self.persisted_state.pallet_genesis)
+			.filter(|genesis| {
+				let res = *genesis == self.persisted_state.pallet_genesis;
+				if !res {
+					error!(target: LOG_TARGET, "🥩 Consensus reset: expected {:?} found in grandpa notification: {:?}", *genesis, self.persisted_state.pallet_genesis);
+				}
+				res
+			})
 			.ok_or(Error::ConsensusReset)?;
 
 		let mut new_session_added = false;
@@ -845,7 +851,7 @@ where
 		block_import_justif: &mut Fuse<
 			NotificationReceiver<BeefyVersionedFinalityProof<B, AuthorityId>>,
 		>,
-		finality_notifications: &mut Fuse<FinalityNotifications<B>>,
+		finality_notifications: &mut Fuse<crate::FinalityNotifications<B>>,
 	) -> (Error, BeefyComms<B, N, AuthorityId>) {
 		info!(
 			target: LOG_TARGET,
