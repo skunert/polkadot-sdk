@@ -623,12 +623,13 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 				error!(target: LOG_TARGET, "🥩 Gossip engine has unexpectedly terminated.");
 				return
 			},
-			_ = transformer => {
+			_ = &mut transformer => {
 				error!(target: LOG_TARGET, "🥩 Notification transformer unexpectedly terminated.");
 				return
 			}
 		};
 
+		info!(target: "skunert", "Transitioned to worker stage.");
 		let worker = worker_builder.build(
 			payload_provider.clone(),
 			sync.clone(),
@@ -637,10 +638,12 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 			BTreeMap::new(),
 			is_authority,
 		);
-
 		match futures::future::select(
 			Box::pin(worker.run(&mut block_import_justif, &mut finality_notifications)),
-			Box::pin(on_demand_justifications_handler.run()),
+			futures::future::select(
+				Box::pin(on_demand_justifications_handler.run()),
+				&mut transformer,
+			),
 		)
 		.await
 		{
@@ -654,8 +657,17 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 			futures::future::Either::Left(((worker_err, _), _)) => {
 				error!(target: LOG_TARGET, "🥩 Error: {:?}. Terminating.", worker_err)
 			},
-			futures::future::Either::Right((odj_handler_err, _)) => {
+			futures::future::Either::Right((
+				futures::future::Either::Left((odj_handler_err, _)),
+				_,
+			)) => {
 				error!(target: LOG_TARGET, "🥩 Error: {:?}. Terminating.", odj_handler_err)
+			},
+			futures::future::Either::Right((
+				futures::future::Either::Right((transformer_err, _)),
+				_,
+			)) => {
+				error!(target: LOG_TARGET, "🥩 Error: {:?}. Terminating.", transformer_err)
 			},
 		};
 		return;
