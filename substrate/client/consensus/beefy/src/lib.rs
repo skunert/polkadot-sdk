@@ -553,7 +553,7 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 	let mut finality_notifications = client.finality_notification_stream().fuse();
 	let mut block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
 
-	let (mut transformer, mut finality_notifications) = {
+	let (transformer, mut finality_notifications) = {
 		let (tx, rx) = sc_utils::mpsc::tracing_unbounded::<StrippedFinalityNotification<B>>(
 			"fin-transformer",
 			10000,
@@ -569,6 +569,8 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 			rx.fuse(),
 		)
 	};
+	let tokio_handle = tokio::runtime::Handle::current();
+	tokio_handle.spawn(transformer);
 
 	let known_peers = Arc::new(Mutex::new(KnownPeers::new()));
 	// Default votes filter is to discard everything.
@@ -623,10 +625,6 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 				error!(target: LOG_TARGET, "🥩 Gossip engine has unexpectedly terminated.");
 				return
 			},
-			_ = &mut transformer => {
-				error!(target: LOG_TARGET, "🥩 Notification transformer unexpectedly terminated.");
-				return
-			}
 		};
 
 		info!(target: "skunert", "Transitioned to worker stage.");
@@ -638,12 +636,10 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 			BTreeMap::new(),
 			is_authority,
 		);
+
 		match futures::future::select(
 			Box::pin(worker.run(&mut block_import_justif, &mut finality_notifications)),
-			futures::future::select(
-				Box::pin(on_demand_justifications_handler.run()),
-				&mut transformer,
-			),
+			Box::pin(on_demand_justifications_handler.run()),
 		)
 		.await
 		{
@@ -657,17 +653,8 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 			futures::future::Either::Left(((worker_err, _), _)) => {
 				error!(target: LOG_TARGET, "🥩 Error: {:?}. Terminating.", worker_err)
 			},
-			futures::future::Either::Right((
-				futures::future::Either::Left((odj_handler_err, _)),
-				_,
-			)) => {
+			futures::future::Either::Right((odj_handler_err, _)) => {
 				error!(target: LOG_TARGET, "🥩 Error: {:?}. Terminating.", odj_handler_err)
-			},
-			futures::future::Either::Right((
-				futures::future::Either::Right((transformer_err, _)),
-				_,
-			)) => {
-				error!(target: LOG_TARGET, "🥩 Error: {:?}. Terminating.", transformer_err)
 			},
 		};
 		return;

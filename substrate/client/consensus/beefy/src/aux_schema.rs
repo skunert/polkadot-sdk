@@ -42,7 +42,8 @@ pub(crate) fn write_voter_state<B: BlockT, BE: AuxStore, AuthorityId: AuthorityI
 	backend: &BE,
 	state: &PersistedState<B, AuthorityId>,
 ) -> ClientResult<()> {
-	trace!(target: LOG_TARGET, "🥩 persisting {:?}", state);
+	// TODO skunert - revert this
+	debug!(target: LOG_TARGET, "🥩 persisting state");
 	AuxStore::insert_aux(backend, &[(WORKER_STATE_KEY, state.encode().as_slice())], &[])
 }
 
