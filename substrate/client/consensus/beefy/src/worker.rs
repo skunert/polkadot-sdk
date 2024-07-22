@@ -29,7 +29,8 @@ use crate::{
 	metric_inc, metric_set,
 	metrics::VoterMetrics,
 	round::{Rounds, VoteImportResult},
-	BeefyComms, BeefyVoterLinks, StrippedFinalityNotification, LOG_TARGET,
+	BeefyComms, BeefyFinalityNotification, BeefyVoterLinks, StrippedFinalityNotification,
+	LOG_TARGET,
 };
 use sp_application_crypto::RuntimeAppPublic;
 
@@ -447,7 +448,7 @@ where
 
 	fn handle_finality_notification(
 		&mut self,
-		notification: &StrippedFinalityNotification<B>,
+		notification: &BeefyFinalityNotification<B, AuthorityId>,
 	) -> Result<(), Error> {
 		let header = &notification.header;
 		debug!(
@@ -851,7 +852,7 @@ where
 		block_import_justif: &mut Fuse<
 			NotificationReceiver<BeefyVersionedFinalityProof<B, AuthorityId>>,
 		>,
-		finality_notifications: &mut Fuse<crate::FinalityNotifications<B>>,
+		finality_notifications: &mut Fuse<crate::FinalityNotifications<B, AuthorityId>>,
 	) -> (Error, BeefyComms<B, N, AuthorityId>) {
 		info!(
 			target: LOG_TARGET,

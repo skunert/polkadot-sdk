@@ -35,10 +35,11 @@ use futures::{stream::Fuse, FutureExt, StreamExt};
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use prometheus_endpoint::Registry;
-use sc_client_api::{Backend, BlockBackend, BlockchainEvents, Finalizer};
+use sc_client_api::{Backend, BlockBackend, BlockchainEvents, FinalityNotification, Finalizer};
 use sc_consensus::BlockImport;
 use sc_network::{NetworkRequest, NotificationService, ProtocolName};
 use sc_network_gossip::{GossipEngine, Network as GossipNetwork, Syncing as GossipSyncing};
+use sc_utils::mpsc::TracingUnboundedReceiver;
 use sp_api::ProvideRuntimeApi;
 use sp_blockchain::{Backend as BlockchainBackend, HeaderBackend};
 use sp_consensus::{Error as ConsensusError, SyncOracle};
@@ -87,8 +88,8 @@ const LOG_TARGET: &str = "beefy";
 
 const HEADER_SYNC_DELAY: Duration = Duration::from_secs(60);
 
-pub type FinalityNotifications<Block> =
-	sc_utils::mpsc::TracingUnboundedReceiver<StrippedFinalityNotification<Block>>;
+pub type FinalityNotifications<Block, AuthorityId> =
+	sc_utils::mpsc::TracingUnboundedReceiver<BeefyFinalityNotification<Block, AuthorityId>>;
 /// A convenience BEEFY client trait that defines all the type bounds a BEEFY client
 /// has to satisfy. Ideally that should actually be a trait alias. Unfortunately as
 /// of today, Rust does not allow a type alias to be used as a trait bound. Tracking
@@ -277,7 +278,7 @@ where
 		metrics: Option<VoterMetrics>,
 		min_block_delta: u32,
 		gossip_validator: Arc<GossipValidator<B, N, AuthorityId>>,
-		finality_notifications: &mut Fuse<FinalityNotifications<B>>,
+		finality_notifications: &mut Fuse<FinalityNotifications<B, AuthorityId>>,
 		is_authority: bool,
 	) -> Result<Self, Error> {
 		// Wait for BEEFY pallet to be active before starting voter.
@@ -507,6 +508,30 @@ impl<B: Block> From<sc_client_api::FinalityNotification<B>> for StrippedFinality
 	}
 }
 
+enum BeefyFinalityNotification<B: Block, A: AuthorityIdBound> {
+	Simple(StrippedFinalityNotification<B>),
+	AuthorityChange(ValidatorSet<A>, B::Header),
+}
+
+async fn transform_finality_notifications<B: Block, A: AuthorityIdBound>(
+	mut finality_notifications: TracingUnboundedReceiver<FinalityNotification<B>>,
+	tx: sc_utils::mpsc::TracingUnboundedSender<BeefyFinalityNotification<B, A>>,
+) {
+	while let Some(notif) = finality_notifications.next().await {
+		info!(target: "skunert", "Transforming grandpa notification for #{} ({})", notif.header.number(), notif.hash);
+		let header = &notif.header;
+		if let Some(change) = find_authorities_change::<B, A>(header) {
+			tx.unbounded_send(BeefyFinalityNotification::AuthorityChange(change, header.clone()))
+				.expect("works");
+		} else {
+			tx.unbounded_send(BeefyFinalityNotification::Simple(
+				StrippedFinalityNotification::from(notif),
+			))
+			.expect("works");
+		};
+	}
+}
+
 /// Start the BEEFY gadget.
 ///
 /// This is a thin shim around running and awaiting a BEEFY worker.
@@ -550,22 +575,19 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 
 	// Subscribe to finality notifications and justifications before waiting for runtime pallet and
 	// reuse the streams, so we don't miss notifications while waiting for pallet to be available.
-	let mut finality_notifications = client.finality_notification_stream().fuse();
+	let mut finality_notifications = client.finality_notification_stream();
 	let mut block_import_justif = links.from_block_import_justif_stream.subscribe(100_000).fuse();
 
 	let (transformer, mut finality_notifications) = {
-		let (tx, rx) = sc_utils::mpsc::tracing_unbounded::<StrippedFinalityNotification<B>>(
+		let (tx, rx) = sc_utils::mpsc::tracing_unbounded::<BeefyFinalityNotification<B, AuthorityId>>(
 			"fin-transformer",
 			10000,
 		);
 		(
-			Box::pin(async move {
-				while let Some(notif) = finality_notifications.next().await {
-					info!(target: "skunert", "Transforming grandpa notification for #{} ({})", notif.header.number(), notif.hash);
-					tx.unbounded_send(notif.into()).expect("works");
-				}
-				error!(target: "skunert", "Transformer terminated!");
-			}.fuse()),
+			Box::pin(transform_finality_notifications::<B, AuthorityId>(
+				finality_notifications,
+				tx,
+			)),
 			rx.fuse(),
 		)
 	};
@@ -704,7 +726,7 @@ where
 /// Should be called only once during worker initialization.
 async fn wait_for_runtime_pallet<B, R, AuthorityId: AuthorityIdBound>(
 	runtime: &R,
-	finality: &mut Fuse<FinalityNotifications<B>>,
+	finality: &mut Fuse<FinalityNotifications<B, AuthorityId>>,
 ) -> Result<(NumberFor<B>, <B as Block>::Header), Error>
 where
 	B: Block,
