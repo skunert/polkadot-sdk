@@ -508,27 +508,55 @@ impl<B: Block> From<sc_client_api::FinalityNotification<B>> for StrippedFinality
 	}
 }
 
-enum BeefyFinalityNotification<B: Block, A: AuthorityIdBound> {
-	Simple(StrippedFinalityNotification<B>),
-	AuthorityChange(ValidatorSet<A>, B::Header),
+struct BeefySetChange<B: Block, A: AuthorityIdBound> {
+	pub number: NumberFor<B>,
+	pub validator_set: ValidatorSet<A>,
 }
 
-async fn transform_finality_notifications<B: Block, A: AuthorityIdBound>(
+struct BeefyFinalityNotification<B: Block, A: AuthorityIdBound> {
+	pub header: B::Header,
+	pub beefy_set_change: Vec<BeefySetChange<B, A>>,
+}
+
+async fn transform_finality_notifications<
+	B: Block,
+	A: AuthorityIdBound,
+	BE: Backend<B> + 'static,
+>(
 	mut finality_notifications: TracingUnboundedReceiver<FinalityNotification<B>>,
 	tx: sc_utils::mpsc::TracingUnboundedSender<BeefyFinalityNotification<B, A>>,
+	backend: Arc<BE>,
 ) {
 	while let Some(notif) = finality_notifications.next().await {
-		info!(target: "skunert", "Transforming grandpa notification for #{} ({})", notif.header.number(), notif.hash);
+		tracing::info!(target: LOG_TARGET, number = ?notif.header.number(), hash = %notif.hash, "Transforming grandpa notification.");
+		let header_to_send = notif.header.clone();
+		let mut set_changes = Vec::new();
+
 		let header = &notif.header;
-		if let Some(change) = find_authorities_change::<B, A>(header) {
-			tx.unbounded_send(BeefyFinalityNotification::AuthorityChange(change, header.clone()))
-				.expect("works");
-		} else {
-			tx.unbounded_send(BeefyFinalityNotification::Simple(
-				StrippedFinalityNotification::from(notif),
-			))
-			.expect("works");
-		};
+		for header in notif
+			.tree_route
+			.iter()
+			.map(|hash| {
+				backend
+					.blockchain()
+					.expect_header(*hash)
+					.expect("just finalized block should be available; qed.")
+			})
+			.chain(std::iter::once(header.clone()))
+		{
+			if let Some(new_validator_set) = find_authorities_change::<B, A>(&header) {
+				tracing::info!(target: LOG_TARGET, number = ?header.number(), hash = %header.hash(), "Found set changes.");
+				set_changes.push(BeefySetChange {
+					number: *header.number(),
+					validator_set: new_validator_set,
+				})
+			}
+		}
+		tx.unbounded_send(BeefyFinalityNotification {
+			header: header_to_send,
+			beefy_set_change: set_changes,
+		})
+		.expect("works");
 	}
 }
 
@@ -539,7 +567,7 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 	beefy_params: BeefyParams<B, BE, C, N, P, R, S, AuthorityId>,
 ) where
 	B: Block,
-	BE: Backend<B>,
+	BE: Backend<B> + 'static,
 	C: Client<B, BE> + BlockBackend<B>,
 	P: PayloadProvider<B> + Clone,
 	R: ProvideRuntimeApi<B>,
@@ -584,9 +612,10 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 			10000,
 		);
 		(
-			Box::pin(transform_finality_notifications::<B, AuthorityId>(
+			Box::pin(transform_finality_notifications::<B, AuthorityId, BE>(
 				finality_notifications,
 				tx,
+				backend.clone(),
 			)),
 			rx.fuse(),
 		)
@@ -649,7 +678,7 @@ pub async fn start_beefy_gadget<B, BE, C, N, P, R, S, AuthorityId>(
 			},
 		};
 
-		info!(target: "skunert", "Transitioned to worker stage.");
+		info!(target: LOG_TARGET, "Transitioned to worker stage.");
 		let worker = worker_builder.build(
 			payload_provider.clone(),
 			sync.clone(),
@@ -741,6 +770,7 @@ where
 			Error::Backend(err_msg)
 		})?;
 		let at = notif.header.hash();
+		tracing::info!(target: LOG_TARGET, hash = %at, "Checking if beefy pallet is available.");
 		if let Some(start) = runtime.runtime_api().beefy_genesis(at).ok().flatten() {
 			if *notif.header.number() >= start {
 				// Beefy pallet available, return header for best grandpa at the time.

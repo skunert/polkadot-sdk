@@ -22,6 +22,7 @@ log = { workspace = true, default-features = true }
 parking_lot = { workspace = true, default-features = true }
 thiserror = { workspace = true }
 wasm-timer = { workspace = true }
+tracing = { workspace = true }
 prometheus-endpoint = { workspace = true, default-features = true }
 sc-client-api = { workspace = true, default-features = true }
 sc-consensus = { workspace = true, default-features = true }
@@ -57,7 +58,7 @@ substrate-test-runtime-client = { workspace = true }
 # This feature adds BLS crypto primitives. It should not be used in production since
 # the BLS implementation and interface may still be subject to significant change.
 bls-experimental = [
-	"sp-application-crypto/bls-experimental",
-	"sp-consensus-beefy/bls-experimental",
-	"sp-core/bls-experimental",
+    "sp-application-crypto/bls-experimental",
+    "sp-consensus-beefy/bls-experimental",
+    "sp-core/bls-experimental",
 ]

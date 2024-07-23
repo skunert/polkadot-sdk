@@ -17451,6 +17451,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tracing",
  "wasm-timer",
 ]
 

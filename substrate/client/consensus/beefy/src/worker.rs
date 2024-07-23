@@ -453,10 +453,9 @@ where
 		let header = &notification.header;
 		debug!(
 			target: LOG_TARGET,
-			"🥩 Finality notification: header(number {:?}, hash {:?}) tree_route {:?}",
+			"🥩 Finality notification: header(number {:?}, hash {:?})",
 			header.number(),
 			header.hash(),
-			notification.tree_route,
 		);
 
 		self.runtime
@@ -479,23 +478,9 @@ where
 			self.persisted_state.set_best_grandpa(header.clone());
 
 			// Check all (newly) finalized blocks for new session(s).
-			let backend = self.backend.clone();
-			for header in notification
-				.tree_route
-				.iter()
-				.map(|hash| {
-					backend
-						.blockchain()
-						.expect_header(*hash)
-						.expect("just finalized block should be available; qed.")
-				})
-				.chain(std::iter::once(header.clone()))
-			{
-				if let Some(new_validator_set) = find_authorities_change::<B, AuthorityId>(&header)
-				{
-					self.init_session_at(new_validator_set, *header.number());
-					new_session_added = true;
-				}
+			for set_change in &notification.beefy_set_change {
+				self.init_session_at(set_change.validator_set.clone(), set_change.number);
+				new_session_added = true;
 			}
 
 			if new_session_added {
