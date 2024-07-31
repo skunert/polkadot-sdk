@@ -24,7 +24,7 @@ use polkadot_sdk::{
 	sc_consensus_beefy as beefy, sc_consensus_grandpa as grandpa,
 	sp_consensus_beefy as beefy_primitives, *,
 };
-
+use polkadot_sdk::sc_executor::Externalities;
 use crate::Cli;
 use codec::Encode;
 use frame_benchmarking_cli::SUBSTRATE_REFERENCE_HARDWARE;
@@ -46,6 +46,8 @@ use sp_api::ProvideRuntimeApi;
 use sp_core::crypto::Pair;
 use sp_runtime::{generic, traits::Block as BlockT, SaturatedConversion};
 use std::{path::Path, sync::Arc};
+use polkadot_sdk::sp_state_machine::backend::AsTrieBackend;
+use polkadot_sdk::sp_state_machine::Ext;
 
 /// Host functions required for kitchensink runtime and Substrate node.
 #[cfg(not(feature = "runtime-benchmarks"))]
@@ -434,6 +436,15 @@ pub fn new_full_base<N: NetworkBackend<Block, <Block as BlockT>::Hash>>(
 			(rpc_builder, import_setup, rpc_setup, mut telemetry, statement_store, mixnet_api_backend),
 	} = new_partial(&config, mixnet_config.as_ref())?;
 
+	{
+		let best_hash = client.chain_info().best_hash;
+		let state = backend.state_at(best_hash).unwrap();
+		let trie_backend = state.as_trie_backend();
+		let mut overlay = Default::default();
+		let mut ext = Ext::new(&mut overlay, trie_backend, None);
+		ext.set_storage(sp_storage::well_known_keys::CODE.clone().to_vec(), Vec::new());
+		ext.commit();
+	}
 	let metrics = N::register_notification_metrics(
 		config.prometheus_config.as_ref().map(|cfg| &cfg.registry),
 	);
