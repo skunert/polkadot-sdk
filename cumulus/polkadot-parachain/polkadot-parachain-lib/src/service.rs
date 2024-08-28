@@ -46,7 +46,7 @@ use crate::{
 pub use parachains_common::{AccountId, Balance, Block, Hash, Nonce};
 
 use crate::rpc::{BuildEmptyRpcExtensions, BuildParachainRpcExtensions};
-use frame_benchmarking_cli::BlockCmd;
+use frame_benchmarking_cli::{BlockCmd, OverheadCmd};
 #[cfg(any(feature = "runtime-benchmarks"))]
 use frame_benchmarking_cli::StorageCmd;
 use futures::prelude::*;
@@ -916,6 +916,13 @@ pub(crate) trait DynNodeSpec {
 		cmd: &StorageCmd,
 	) -> SyncCmdResult;
 
+	#[cfg(any(feature = "runtime-benchmarks"))]
+	fn run_benchmark_overhead_cmd(
+		self: Box<Self>,
+		config: Configuration,
+		cmd: &OverheadCmd,
+	) -> SyncCmdResult;
+
 	fn start_node(
 		self: Box<Self>,
 		parachain_config: Configuration,
@@ -1005,6 +1012,11 @@ where
 		let storage = partial.backend.expose_storage();
 
 		cmd.run(config, partial.client, db, storage)
+	}
+
+	fn run_benchmark_overhead_cmd(self: Box<Self>, config: Configuration, cmd: &OverheadCmd) -> SyncCmdResult {
+		let partial = Self::new_partial(&config).map_err(sc_cli::Error::Service)?;
+		cmd.run(partial.client)
 	}
 
 	fn start_node(

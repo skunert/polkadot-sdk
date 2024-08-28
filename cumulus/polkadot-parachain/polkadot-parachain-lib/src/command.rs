@@ -179,6 +179,14 @@ pub fn run<CliConfig: crate::cli::CliConfig>(cmd_config: RunConfig) -> Result<()
 				}),
 				BenchmarkCmd::Machine(cmd) =>
 					runner.sync_run(|config| cmd.run(&config, SUBSTRATE_REFERENCE_HARDWARE.clone())),
+				BenchmarkCmd::Overhead(cmd) => runner.sync_run(|config| {
+					let node = new_node_spec(
+						&config,
+						&cmd_config.runtime_resolver,
+						&cli.node_extra_args(),
+					)?;
+					node.run_benchmark_overhead_cmd(config, cmd)
+				}),
 				#[allow(unreachable_patterns)]
 				_ => Err("Benchmarking sub-command unsupported or compilation feature missing. \
 					Make sure to compile with --features=runtime-benchmarks \

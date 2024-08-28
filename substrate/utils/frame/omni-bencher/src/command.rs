@@ -135,6 +135,9 @@ impl V1SubCommand {
 		let pallet = match self {
 			V1SubCommand::Benchmark(V1BenchmarkCommand { sub }) => match sub {
 				BenchmarkCmd::Pallet(pallet) => pallet,
+				BenchmarkCmd::Overhead(overhead_cmd) => {
+					todo!()
+				},
 				_ =>
 					return Err(
 						"Only the `v1 benchmark pallet` command is currently supported".into()
