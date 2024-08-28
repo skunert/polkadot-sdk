@@ -31,13 +31,13 @@ use sp_runtime::{
 	Digest, DigestItem, OpaqueExtrinsic,
 };
 
+use super::ExtrinsicBuilder;
+use crate::shared::{StatSelect, Stats};
 use clap::Args;
 use log::info;
 use serde::Serialize;
+use sp_trie::proof_size_extension::ProofSizeExt;
 use std::{marker::PhantomData, sync::Arc, time::Instant};
-
-use super::ExtrinsicBuilder;
-use crate::shared::{StatSelect, Stats};
 
 /// Parameters to configure an *overhead* benchmark.
 #[derive(Debug, Default, Serialize, Clone, PartialEq, Args)]
@@ -59,6 +59,14 @@ pub struct BenchmarkParams {
 	/// Include the benchmarked proof size in the output.
 	#[arg(long)]
 	pub enable_proof_size: bool,
+
+	/// Para Id to Benchmark
+	#[arg(long)]
+	pub para_id: u32,
+
+	/// tx-bytes
+	#[arg(long)]
+	pub tx_bytes: String,
 }
 
 /// The results of multiple runs in nano seconds.
@@ -190,8 +198,13 @@ where
 
 		info!("Running {} warmups...", self.params.warmup);
 		for _ in 0..self.params.warmup {
-			self.client
-				.runtime_api()
+			let mut runtime_api = self.client.runtime_api();
+			runtime_api.record_proof();
+			let recorder = runtime_api
+				.proof_recorder()
+				.expect("Proof recording is enabled in the line above; qed.");
+			runtime_api.register_extension(ProofSizeExt::new(recorder));
+			runtime_api
 				.execute_block(genesis, block.clone())
 				.map_err(|e| Error::Client(RuntimeApiError(e)))?;
 		}
@@ -201,7 +214,12 @@ where
 		// Execute a block multiple times and record each execution time.
 		for _ in 0..self.params.repeat {
 			let block = block.clone();
-			let runtime_api = self.client.runtime_api();
+			let mut runtime_api = self.client.runtime_api();
+			runtime_api.record_proof();
+			let recorder = runtime_api
+				.proof_recorder()
+				.expect("Proof recording is enabled in the line above; qed.");
+			runtime_api.register_extension(ProofSizeExt::new(recorder));
 			let start = Instant::now();
 
 			runtime_api

@@ -46,7 +46,7 @@ use crate::{
 pub use parachains_common::{AccountId, Balance, Block, Hash, Nonce};
 
 use crate::rpc::{BuildEmptyRpcExtensions, BuildParachainRpcExtensions};
-use codec::Encode;
+use codec::{Decode, Encode};
 use cumulus_client_parachain_inherent::ParachainInherentData;
 #[cfg(any(feature = "runtime-benchmarks"))]
 use frame_benchmarking_cli::StorageCmd;
@@ -63,16 +63,18 @@ use sc_consensus::{
 };
 use sc_executor::{HeapAllocStrategy, WasmExecutor, DEFAULT_HEAP_ALLOC_STRATEGY};
 use sc_network::{config::FullNetworkConfiguration, service::traits::NetworkBackend, NetworkBlock};
+use sc_rpc::state::StateApiClient;
 use sc_service::{Configuration, Error, PartialComponents, TFullBackend, TFullClient, TaskManager};
 use sc_sysinfo::HwBench;
 use sc_telemetry::{Telemetry, TelemetryHandle, TelemetryWorker, TelemetryWorkerHandle};
 use sc_transaction_pool::FullPool;
-use sp_api::ProvideRuntimeApi;
+use sp_api::{Metadata, ProvideRuntimeApi};
 use sp_core::Pair;
 use sp_inherents::{CreateInherentDataProviders, InherentDataProvider};
 use sp_keystore::KeystorePtr;
 use sp_runtime::{app_crypto::AppCrypto, traits::Header as HeaderT, OpaqueExtrinsic};
 use std::{marker::PhantomData, pin::Pin, sync::Arc, time::Duration};
+use subxt::ext::frame_metadata::RuntimeMetadataPrefixed;
 
 #[cfg(not(feature = "runtime-benchmarks"))]
 type HostFunctions = cumulus_client_service::ParachainHostFunctions;
@@ -922,7 +924,6 @@ pub(crate) trait DynNodeSpec {
 		cmd: &StorageCmd,
 	) -> SyncCmdResult;
 
-	#[cfg(any(feature = "runtime-benchmarks"))]
 	fn run_benchmark_overhead_cmd(
 		self: Box<Self>,
 		config: Configuration,
@@ -1033,7 +1034,7 @@ where
 		let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
 		// relay_state.para_id = rococo_parachain_runtime::PARA
 		relay_state.included_para_head = Some(header.encode().into());
-		relay_state.para_id = ParaId::from(1000);
+		relay_state.para_id = ParaId::from(cmd.params.bench.para_id);
 		let mut vfp = PersistedValidationData::default();
 		let (root, proof) = relay_state.into_state_root_and_proof();
 		vfp.relay_parent_storage_root = root;
@@ -1049,7 +1050,14 @@ where
 		let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
 		let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
 		let remark_builder = ParaRemarkBuilder { client: client.clone() };
-		cmd.run(config, client, inherent_data, Vec::new(), &remark_builder)
+		let byte_builder = ByteRemarkBuilder::new(cmd.params.bench.tx_bytes.clone());
+		let test1 = remark_builder.build(0).unwrap();
+		let test2 = byte_builder.build(0).unwrap();
+		log::info!("{test1:?}");
+		log::info!("{test2:?}");
+		assert_eq!(test1, test2);
+		//cmd.run(config, client, inherent_data, Vec::new(), &remark_builder)
+		Ok(())
 	}
 
 	fn start_node(
@@ -1088,7 +1096,11 @@ struct ParaRemarkBuilder<RuntimeApi> {
 	client: Arc<ParachainClient<RuntimeApi>>,
 }
 
-impl<RuntimeApi> ExtrinsicBuilder for ParaRemarkBuilder<RuntimeApi> {
+impl<RuntimeApi> ExtrinsicBuilder for ParaRemarkBuilder<RuntimeApi>
+where
+	RuntimeApi: ConstructNodeRuntimeApi<Block, ParachainClient<RuntimeApi>>,
+	RuntimeApi::RuntimeApi: Metadata<Block>,
+{
 	fn pallet(&self) -> &str {
 		"system"
 	}
@@ -1102,8 +1114,16 @@ impl<RuntimeApi> ExtrinsicBuilder for ParaRemarkBuilder<RuntimeApi> {
 		let period = 128;
 		let genesis = self.client.usage_info().chain.best_hash;
 		let signer = sp_keyring::Sr25519Keyring::Bob.pair();
+		log::info!("genesis: {:?}", genesis);
 		let current_block = 0;
+		let mut metadata = self.client.runtime_api().metadata(genesis).unwrap();
 
+		let runtime_version = subxt::client::RuntimeVersion {
+			spec_version: rococo_parachain_runtime::VERSION.spec_version,
+			transaction_version: rococo_parachain_runtime::VERSION.transaction_version,
+		};
+
+		tracing::info!(?runtime_version.spec_version, ?runtime_version.transaction_version, "Fetched version.");
 		let extra: rococo_parachain_runtime::SignedExtra =
 			(
 				frame_system::CheckNonZeroSender::<rococo_parachain_runtime::Runtime>::new(),
@@ -1111,7 +1131,7 @@ impl<RuntimeApi> ExtrinsicBuilder for ParaRemarkBuilder<RuntimeApi> {
 				frame_system::CheckTxVersion::<rococo_parachain_runtime::Runtime>::new(),
 				frame_system::CheckGenesis::<rococo_parachain_runtime::Runtime>::new(),
 				frame_system::CheckEra::<rococo_parachain_runtime::Runtime>::from(
-					sp_runtime::generic::Era::mortal(128, 0),
+					sp_runtime::generic::Era::immortal(),
 				),
 				frame_system::CheckNonce::<rococo_parachain_runtime::Runtime>::from(nonce),
 				frame_system::CheckWeight::<rococo_parachain_runtime::Runtime>::new(),
@@ -1141,12 +1161,50 @@ impl<RuntimeApi> ExtrinsicBuilder for ParaRemarkBuilder<RuntimeApi> {
 			),
 		);
 		let signature = payload.using_encoded(|p| signer.sign(p));
-		Ok(rococo_parachain_runtime::UncheckedExtrinsic::new_signed(
+		let unchecked_extrinsic = rococo_parachain_runtime::UncheckedExtrinsic::new_signed(
 			call,
 			sp_runtime::AccountId32::from(signer.public()).into(),
 			sp_runtime::MultiSignature::Sr25519(signature),
 			extra,
-		)
-		.into())
+		);
+		let encoded = unchecked_extrinsic.clone().encode();
+		Ok(unchecked_extrinsic.into())
+	}
+}
+
+struct ByteRemarkBuilder {
+	tx_bytes: Vec<u8>,
+}
+
+impl ByteRemarkBuilder {
+	pub fn new(hex: String) -> Self {
+		let str_without_0x = match hex.strip_prefix("0x") {
+			Some(val) => val,
+			None => &hex,
+		};
+
+		let hex_bytes = match hex::decode(str_without_0x) {
+			Ok(bytes) => bytes,
+			Err(e) => panic!("NOOOOOO"),
+		};
+
+		ByteRemarkBuilder { tx_bytes: hex_bytes }
+	}
+}
+
+impl ExtrinsicBuilder for ByteRemarkBuilder {
+	fn pallet(&self) -> &str {
+		"system"
+	}
+
+	fn extrinsic(&self) -> &str {
+		"remark"
+	}
+
+	fn build(&self, nonce: u32) -> Result<OpaqueExtrinsic, &'static str> {
+		log::info!("Building extrinsic with nonce {}", nonce);
+		debug_assert!(nonce == 0);
+		Ok(OpaqueExtrinsic::from_bytes(&self.tx_bytes)
+			.expect("Opaqueextrinsic construction failed"))
 	}
 }

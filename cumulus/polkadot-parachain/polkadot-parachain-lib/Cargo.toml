@@ -69,6 +69,7 @@ cumulus-primitives-storage-weight-reclaim = { workspace = true, default-features
 substrate-frame-rpc-system = { workspace = true, default-features = true }
 pallet-transaction-payment-rpc = { workspace = true, default-features = true }
 substrate-state-trie-migration-rpc = { workspace = true, default-features = true }
+subxt = "0.37.0"
 
 # Polkadot
 polkadot-cli = { workspace = true, default-features = true }
@@ -87,6 +88,8 @@ cumulus-primitives-aura = { workspace = true, default-features = true }
 cumulus-primitives-core = { workspace = true, default-features = true }
 cumulus-relay-chain-interface = { workspace = true, default-features = true }
 cumulus-test-relay-sproof-builder = { workspace = true, default-features = true }
+hex = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
