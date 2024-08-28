@@ -46,14 +46,17 @@ use crate::{
 pub use parachains_common::{AccountId, Balance, Block, Hash, Nonce};
 
 use crate::rpc::{BuildEmptyRpcExtensions, BuildParachainRpcExtensions};
-use frame_benchmarking_cli::{BlockCmd, OverheadCmd};
+use codec::Encode;
+use cumulus_client_parachain_inherent::ParachainInherentData;
 #[cfg(any(feature = "runtime-benchmarks"))]
 use frame_benchmarking_cli::StorageCmd;
+use frame_benchmarking_cli::{BlockCmd, ExtrinsicBuilder, OverheadCmd};
 use futures::prelude::*;
-use polkadot_primitives::CollatorPair;
+use polkadot_cli::IdentifyVariant;
+use polkadot_primitives::{CollatorPair, PersistedValidationData};
 use prometheus_endpoint::Registry;
 use sc_cli::{CheckBlockCmd, ExportBlocksCmd, ExportStateCmd, ImportBlocksCmd, RevertCmd};
-use sc_client_api::BlockchainEvents;
+use sc_client_api::{BlockchainEvents, HeaderBackend, UsageProvider};
 use sc_consensus::{
 	import_queue::{BasicQueue, Verifier as VerifierT},
 	BlockImportParams, DefaultImportQueue, ImportQueue,
@@ -65,9 +68,10 @@ use sc_sysinfo::HwBench;
 use sc_telemetry::{Telemetry, TelemetryHandle, TelemetryWorker, TelemetryWorkerHandle};
 use sc_transaction_pool::FullPool;
 use sp_api::ProvideRuntimeApi;
-use sp_inherents::CreateInherentDataProviders;
+use sp_core::Pair;
+use sp_inherents::{CreateInherentDataProviders, InherentDataProvider};
 use sp_keystore::KeystorePtr;
-use sp_runtime::{app_crypto::AppCrypto, traits::Header as HeaderT};
+use sp_runtime::{app_crypto::AppCrypto, traits::Header as HeaderT, OpaqueExtrinsic};
 use std::{marker::PhantomData, pin::Pin, sync::Arc, time::Duration};
 
 #[cfg(not(feature = "runtime-benchmarks"))]
@@ -837,11 +841,13 @@ where
 			},
 		};
 
-		let fut =
-			async move {
-				wait_for_aura(client).await;
-				aura::run_with_export::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _>(params).await;
-			};
+		let fut = async move {
+			wait_for_aura(client).await;
+			aura::run_with_export::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _>(
+				params,
+			)
+			.await;
+		};
 		task_manager.spawn_essential_handle().spawn("aura", None, fut);
 
 		Ok(())
@@ -1010,13 +1016,40 @@ where
 		let partial = Self::new_partial(&config).map_err(sc_cli::Error::Service)?;
 		let db = partial.backend.expose_db();
 		let storage = partial.backend.expose_storage();
-
 		cmd.run(config, partial.client, db, storage)
 	}
 
-	fn run_benchmark_overhead_cmd(self: Box<Self>, config: Configuration, cmd: &OverheadCmd) -> SyncCmdResult {
+	fn run_benchmark_overhead_cmd(
+		self: Box<Self>,
+		config: Configuration,
+		cmd: &OverheadCmd,
+	) -> SyncCmdResult {
 		let partial = Self::new_partial(&config).map_err(sc_cli::Error::Service)?;
-		cmd.run(partial.client)
+		let client = partial.client.clone();
+		let duration = std::time::Duration::from_millis(0);
+
+		let genesis = client.usage_info().chain.best_hash;
+		let header = client.header(genesis).unwrap().unwrap();
+		let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
+		// relay_state.para_id = rococo_parachain_runtime::PARA
+		relay_state.included_para_head = Some(header.encode().into());
+		relay_state.para_id = ParaId::from(1000);
+		let mut vfp = PersistedValidationData::default();
+		let (root, proof) = relay_state.into_state_root_and_proof();
+		vfp.relay_parent_storage_root = root;
+		let para_data = ParachainInherentData {
+			validation_data: vfp,
+			relay_chain_state: proof,
+			downward_messages: Default::default(),
+			horizontal_messages: Default::default(),
+		};
+
+		let mut inherent_data = sp_inherents::InherentData::new();
+		let timestamp = sp_timestamp::InherentDataProvider::new(duration.into());
+		let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
+		let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
+		let remark_builder = ParaRemarkBuilder { client: client.clone() };
+		cmd.run(config, client, inherent_data, Vec::new(), &remark_builder)
 	}
 
 	fn start_node(
@@ -1048,5 +1081,72 @@ where
 					node_extra_args,
 				),
 		}
+	}
+}
+
+struct ParaRemarkBuilder<RuntimeApi> {
+	client: Arc<ParachainClient<RuntimeApi>>,
+}
+
+impl<RuntimeApi> ExtrinsicBuilder for ParaRemarkBuilder<RuntimeApi> {
+	fn pallet(&self) -> &str {
+		"system"
+	}
+
+	fn extrinsic(&self) -> &str {
+		"remark"
+	}
+
+	fn build(&self, nonce: u32) -> Result<OpaqueExtrinsic, &'static str> {
+		// We apply the extrinsic directly, so let's take some random period.
+		let period = 128;
+		let genesis = self.client.usage_info().chain.best_hash;
+		let signer = sp_keyring::Sr25519Keyring::Bob.pair();
+		let current_block = 0;
+
+		let extra: rococo_parachain_runtime::SignedExtra =
+			(
+				frame_system::CheckNonZeroSender::<rococo_parachain_runtime::Runtime>::new(),
+				frame_system::CheckSpecVersion::<rococo_parachain_runtime::Runtime>::new(),
+				frame_system::CheckTxVersion::<rococo_parachain_runtime::Runtime>::new(),
+				frame_system::CheckGenesis::<rococo_parachain_runtime::Runtime>::new(),
+				frame_system::CheckEra::<rococo_parachain_runtime::Runtime>::from(
+					sp_runtime::generic::Era::mortal(128, 0),
+				),
+				frame_system::CheckNonce::<rococo_parachain_runtime::Runtime>::from(nonce),
+				frame_system::CheckWeight::<rococo_parachain_runtime::Runtime>::new(),
+				pallet_transaction_payment::ChargeTransactionPayment::<
+					rococo_parachain_runtime::Runtime,
+				>::from(0),
+				cumulus_primitives_storage_weight_reclaim::StorageWeightReclaim::<
+					rococo_parachain_runtime::Runtime,
+				>::new(),
+			);
+		let call = rococo_parachain_runtime::RuntimeCall::System(frame_system::Call::remark {
+			remark: vec![],
+		});
+		let payload = sp_runtime::generic::SignedPayload::from_raw(
+			call.clone(),
+			extra.clone(),
+			(
+				(),
+				rococo_parachain_runtime::VERSION.spec_version,
+				rococo_parachain_runtime::VERSION.transaction_version,
+				genesis,
+				genesis,
+				(),
+				(),
+				(),
+				(),
+			),
+		);
+		let signature = payload.using_encoded(|p| signer.sign(p));
+		Ok(rococo_parachain_runtime::UncheckedExtrinsic::new_signed(
+			call,
+			sp_runtime::AccountId32::from(signer.public()).into(),
+			sp_runtime::MultiSignature::Sr25519(signature),
+			extra,
+		)
+		.into())
 	}
 }

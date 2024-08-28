@@ -9573,9 +9573,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.36.1"
+version = "0.36.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "081b846d1d56ddfc18fdf1a922e4f6e07a11768ea1b92dec44e42b72712ccfce"
+checksum = "27b64972346851a39438c60b341ebc01bba47464ae329e55cf343eb93964efd9"
 dependencies = [
  "memchr",
 ]
@@ -14014,11 +14014,14 @@ dependencies = [
  "cumulus-client-service",
  "cumulus-primitives-aura",
  "cumulus-primitives-core",
+ "cumulus-primitives-storage-weight-reclaim",
  "cumulus-relay-chain-interface",
+ "cumulus-test-relay-sproof-builder",
  "docify",
  "frame-benchmarking",
  "frame-benchmarking-cli",
  "frame-support",
+ "frame-system",
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
  "futures",
@@ -14032,6 +14035,7 @@ dependencies = [
  "parity-scale-codec",
  "polkadot-cli",
  "polkadot-primitives",
+ "rococo-parachain-runtime",
  "sc-basic-authorship",
  "sc-chain-spec",
  "sc-cli",
@@ -14053,6 +14057,7 @@ dependencies = [
  "sp-core",
  "sp-genesis-builder",
  "sp-inherents",
+ "sp-keyring",
  "sp-keystore",
  "sp-runtime",
  "sp-session",
@@ -15357,7 +15362,7 @@ dependencies = [
  "gimli 0.28.0",
  "hashbrown 0.14.3",
  "log",
- "object 0.36.1",
+ "object 0.36.3",
  "polkavm-common 0.10.0",
  "regalloc2 0.9.3",
  "rustc-demangle",

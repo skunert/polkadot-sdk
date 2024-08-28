@@ -289,6 +289,9 @@ impl RelayChainStateProof {
 	///
 	/// Returns an error if anything failed at reading or decoding.
 	pub fn read_included_para_head(&self) -> Result<relay_chain::HeadData, Error> {
+		let id: u32 = self.para_id.into();
+		log::info!("para {}", id);
+
 		read_entry(&self.trie_backend, &relay_chain::well_known_keys::para_head(self.para_id), None)
 			.map_err(Error::ParaHead)
 	}

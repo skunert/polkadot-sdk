@@ -366,7 +366,8 @@ pub mod pallet {
 
 			let maximum_channels = host_config
 				.hrmp_max_message_num_per_candidate
-				.min(<AnnouncedHrmpMessagesPerCandidate<T>>::take()) as usize;
+				.min(<AnnouncedHrmpMessagesPerCandidate<T>>::take())
+				as usize;
 
 			// Note: this internally calls the `GetChannelInfo` implementation for this
 			// pallet, which draws on the `RelevantMessagingState`. That in turn has
@@ -1206,6 +1207,7 @@ impl<T: Config> Pallet<T> {
 		let unincluded_segment_len = <UnincludedSegment<T>>::decode_len().unwrap_or(0);
 		weight_used += T::DbWeight::get().reads(1);
 
+		log::info!("Hello world {:?}", para_head);
 		// Clean up unincluded segment if nonempty.
 		let included_head = match (para_head, capacity.is_expecting_included_parent()) {
 			(Some(h), true) => {

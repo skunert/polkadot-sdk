@@ -179,6 +179,7 @@ pub fn run<CliConfig: crate::cli::CliConfig>(cmd_config: RunConfig) -> Result<()
 				}),
 				BenchmarkCmd::Machine(cmd) =>
 					runner.sync_run(|config| cmd.run(&config, SUBSTRATE_REFERENCE_HARDWARE.clone())),
+				#[cfg(feature = "runtime-benchmarks")]
 				BenchmarkCmd::Overhead(cmd) => runner.sync_run(|config| {
 					let node = new_node_spec(
 						&config,
