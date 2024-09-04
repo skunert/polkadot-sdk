@@ -1207,7 +1207,6 @@ impl<T: Config> Pallet<T> {
 		let unincluded_segment_len = <UnincludedSegment<T>>::decode_len().unwrap_or(0);
 		weight_used += T::DbWeight::get().reads(1);
 
-		log::info!("Hello world {:?}", para_head);
 		// Clean up unincluded segment if nonempty.
 		let included_head = match (para_head, capacity.is_expecting_included_parent()) {
 			(Some(h), true) => {

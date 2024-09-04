@@ -68,13 +68,16 @@ use sc_service::{Configuration, Error, PartialComponents, TFullBackend, TFullCli
 use sc_sysinfo::HwBench;
 use sc_telemetry::{Telemetry, TelemetryHandle, TelemetryWorker, TelemetryWorkerHandle};
 use sc_transaction_pool::FullPool;
-use sp_api::{Metadata, ProvideRuntimeApi};
+use sp_api::{Core, Metadata, ProvideRuntimeApi};
 use sp_core::Pair;
 use sp_inherents::{CreateInherentDataProviders, InherentDataProvider};
 use sp_keystore::KeystorePtr;
 use sp_runtime::{app_crypto::AppCrypto, traits::Header as HeaderT, OpaqueExtrinsic};
 use std::{marker::PhantomData, pin::Pin, sync::Arc, time::Duration};
-use subxt::ext::frame_metadata::RuntimeMetadataPrefixed;
+use subxt::{
+	config::substrate::SubstrateExtrinsicParamsBuilder,
+	ext::frame_metadata::RuntimeMetadataPrefixed, tx::PairSigner, OfflineClient, SubstrateConfig,
+};
 
 #[cfg(not(feature = "runtime-benchmarks"))]
 type HostFunctions = cumulus_client_service::ParachainHostFunctions;
@@ -1049,15 +1052,9 @@ where
 		let timestamp = sp_timestamp::InherentDataProvider::new(duration.into());
 		let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
 		let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
-		let remark_builder = ParaRemarkBuilder { client: client.clone() };
+		let remark_builder = DynamicRemarkBuilder { client: client.clone() };
 		let byte_builder = ByteRemarkBuilder::new(cmd.params.bench.tx_bytes.clone());
-		let test1 = remark_builder.build(0).unwrap();
-		let test2 = byte_builder.build(0).unwrap();
-		log::info!("{test1:?}");
-		log::info!("{test2:?}");
-		assert_eq!(test1, test2);
-		//cmd.run(config, client, inherent_data, Vec::new(), &remark_builder)
-		Ok(())
+		cmd.run(config, client, inherent_data, Vec::new(), &remark_builder)
 	}
 
 	fn start_node(
@@ -1202,9 +1199,67 @@ impl ExtrinsicBuilder for ByteRemarkBuilder {
 	}
 
 	fn build(&self, nonce: u32) -> Result<OpaqueExtrinsic, &'static str> {
-		log::info!("Building extrinsic with nonce {}", nonce);
-		debug_assert!(nonce == 0);
 		Ok(OpaqueExtrinsic::from_bytes(&self.tx_bytes)
 			.expect("Opaqueextrinsic construction failed"))
+	}
+}
+struct DynamicRemarkBuilder<RuntimeApi> {
+	client: Arc<ParachainClient<RuntimeApi>>,
+}
+
+impl<RuntimeApi> ExtrinsicBuilder for DynamicRemarkBuilder<RuntimeApi>
+where
+	RuntimeApi: ConstructNodeRuntimeApi<Block, ParachainClient<RuntimeApi>>,
+	RuntimeApi::RuntimeApi: Metadata<Block>,
+{
+	fn pallet(&self) -> &str {
+		"system"
+	}
+
+	fn extrinsic(&self) -> &str {
+		"remark"
+	}
+
+	fn build(&self, nonce: u32) -> Result<OpaqueExtrinsic, &'static str> {
+		// We apply the extrinsic directly, so let's take some random period.
+		let genesis = self.client.usage_info().chain.best_hash;
+		tracing::debug!(?genesis, "Genesis");
+
+		let api = self.client.runtime_api();
+		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
+
+		tracing::debug!(?supported_metadata_versions, "Supported Metadata");
+
+		let Some(latest) = supported_metadata_versions.pop() else {
+			return Err("No metadata version is supported");
+		};
+
+		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
+			return Err("Unable to fetch metadata");
+		};
+
+		let version = api.version(genesis).unwrap();
+
+		let runtime_version = subxt::client::RuntimeVersion {
+			spec_version: version.spec_version,
+			transaction_version: version.transaction_version,
+		};
+
+		let signer = subxt_signer::sr25519::dev::bob();
+		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
+			.map_err(|e| tracing::error!("Error {e}"))
+			.unwrap();
+		tracing::debug!(?runtime_version.spec_version, ?runtime_version.transaction_version, "Fetched version.");
+		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
+		let offline: OfflineClient<SubstrateConfig> =
+			subxt::client::OfflineClient::new(genesis, runtime_version, metadata);
+
+		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce.into()).build();
+		// Default transaction parameters assume a nonce of 0.
+		let transaction = offline.tx().create_signed_offline(&dynamic_tx, &signer, params).unwrap();
+		let mut encoded = transaction.into_encoded();
+		let opaque_extrinsic = OpaqueExtrinsic::from_bytes(&mut encoded)
+			.map_err(|_| "Unable to construct OpaqueExtrinsic")?;
+		Ok(opaque_extrinsic)
 	}
 }

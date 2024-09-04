@@ -69,7 +69,8 @@ cumulus-primitives-storage-weight-reclaim = { workspace = true, default-features
 substrate-frame-rpc-system = { workspace = true, default-features = true }
 pallet-transaction-payment-rpc = { workspace = true, default-features = true }
 substrate-state-trie-migration-rpc = { workspace = true, default-features = true }
-subxt = "0.37.0"
+subxt = { workspace = true, features = ["substrate-compat"] }
+subxt-signer = { workspace = true }
 
 # Polkadot
 polkadot-cli = { workspace = true, default-features = true }
