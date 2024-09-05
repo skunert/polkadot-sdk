@@ -1053,7 +1053,6 @@ where
 		let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
 		let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
 		let remark_builder = DynamicRemarkBuilder { client: client.clone() };
-		let byte_builder = ByteRemarkBuilder::new(cmd.params.bench.tx_bytes.clone());
 		cmd.run(config, client, inherent_data, Vec::new(), &remark_builder)
 	}
 
@@ -1111,16 +1110,12 @@ where
 		let period = 128;
 		let genesis = self.client.usage_info().chain.best_hash;
 		let signer = sp_keyring::Sr25519Keyring::Bob.pair();
-		log::info!("genesis: {:?}", genesis);
-		let current_block = 0;
-		let mut metadata = self.client.runtime_api().metadata(genesis).unwrap();
 
 		let runtime_version = subxt::client::RuntimeVersion {
 			spec_version: rococo_parachain_runtime::VERSION.spec_version,
 			transaction_version: rococo_parachain_runtime::VERSION.transaction_version,
 		};
 
-		tracing::info!(?runtime_version.spec_version, ?runtime_version.transaction_version, "Fetched version.");
 		let extra: rococo_parachain_runtime::SignedExtra =
 			(
 				frame_system::CheckNonZeroSender::<rococo_parachain_runtime::Runtime>::new(),
@@ -1169,40 +1164,6 @@ where
 	}
 }
 
-struct ByteRemarkBuilder {
-	tx_bytes: Vec<u8>,
-}
-
-impl ByteRemarkBuilder {
-	pub fn new(hex: String) -> Self {
-		let str_without_0x = match hex.strip_prefix("0x") {
-			Some(val) => val,
-			None => &hex,
-		};
-
-		let hex_bytes = match hex::decode(str_without_0x) {
-			Ok(bytes) => bytes,
-			Err(e) => panic!("NOOOOOO"),
-		};
-
-		ByteRemarkBuilder { tx_bytes: hex_bytes }
-	}
-}
-
-impl ExtrinsicBuilder for ByteRemarkBuilder {
-	fn pallet(&self) -> &str {
-		"system"
-	}
-
-	fn extrinsic(&self) -> &str {
-		"remark"
-	}
-
-	fn build(&self, nonce: u32) -> Result<OpaqueExtrinsic, &'static str> {
-		Ok(OpaqueExtrinsic::from_bytes(&self.tx_bytes)
-			.expect("Opaqueextrinsic construction failed"))
-	}
-}
 struct DynamicRemarkBuilder<RuntimeApi> {
 	client: Arc<ParachainClient<RuntimeApi>>,
 }
@@ -1223,12 +1184,9 @@ where
 	fn build(&self, nonce: u32) -> Result<OpaqueExtrinsic, &'static str> {
 		// We apply the extrinsic directly, so let's take some random period.
 		let genesis = self.client.usage_info().chain.best_hash;
-		tracing::debug!(?genesis, "Genesis");
 
 		let api = self.client.runtime_api();
 		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
-
-		tracing::debug!(?supported_metadata_versions, "Supported Metadata");
 
 		let Some(latest) = supported_metadata_versions.pop() else {
 			return Err("No metadata version is supported");
@@ -1249,17 +1207,16 @@ where
 		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
 			.map_err(|e| tracing::error!("Error {e}"))
 			.unwrap();
-		tracing::debug!(?runtime_version.spec_version, ?runtime_version.transaction_version, "Fetched version.");
+
 		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
 		let offline: OfflineClient<SubstrateConfig> =
-			subxt::client::OfflineClient::new(genesis, runtime_version, metadata);
+			OfflineClient::new(genesis, runtime_version, metadata);
 
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce.into()).build();
 		// Default transaction parameters assume a nonce of 0.
 		let transaction = offline.tx().create_signed_offline(&dynamic_tx, &signer, params).unwrap();
 		let mut encoded = transaction.into_encoded();
-		let opaque_extrinsic = OpaqueExtrinsic::from_bytes(&mut encoded)
-			.map_err(|_| "Unable to construct OpaqueExtrinsic")?;
-		Ok(opaque_extrinsic)
+
+		OpaqueExtrinsic::from_bytes(&mut encoded).map_err(|_| "Unable to construct OpaqueExtrinsic")
 	}
 }

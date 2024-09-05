@@ -63,10 +63,6 @@ pub struct BenchmarkParams {
 	/// Para Id to Benchmark
 	#[arg(long)]
 	pub para_id: u32,
-
-	/// tx-bytes
-	#[arg(long)]
-	pub tx_bytes: String,
 }
 
 /// The results of multiple runs in nano seconds.
