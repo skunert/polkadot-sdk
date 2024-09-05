@@ -17,7 +17,8 @@
 
 use clap::Parser;
 use frame_benchmarking_cli::BenchmarkCmd;
-use sc_cli::Result;
+use sc_cli::{ChainSpec, CliConfiguration, Result, SubstrateCli};
+use sc_service::NoExtension;
 use sp_runtime::traits::BlakeTwo256;
 
 /// # Polkadot Omni Benchmarking CLI
@@ -87,6 +88,39 @@ pub struct Command {
 	sub: SubCommand,
 }
 
+impl SubstrateCli for Command {
+	fn impl_name() -> String {
+		"Omni-Bencher".to_string()
+	}
+
+	fn impl_version() -> String {
+		"Omni-Bencher".to_string()
+	}
+
+	fn description() -> String {
+		"Omni-Bencher".to_string()
+	}
+
+	fn author() -> String {
+		"Omni-Bencher".to_string()
+	}
+
+	fn support_url() -> String {
+		"Omni-Bencher".to_string()
+	}
+
+	fn copyright_start_year() -> i32 {
+		10
+	}
+
+	fn load_spec(&self, path: &str) -> std::result::Result<Box<dyn ChainSpec>, String> {
+		let path = std::path::PathBuf::from(path);
+
+		Ok(Box::new(sc_service::GenericChainSpec::<NoExtension, ()>::from_json_file(path.clone())?)
+			as Box<dyn sc_service::ChainSpec>)
+	}
+}
+
 /// Root-level subcommands.
 #[derive(Debug, clap::Subcommand)]
 pub enum SubCommand {
@@ -123,36 +157,59 @@ type HostFunctions = (
 );
 
 impl Command {
-	pub fn run(self) -> Result<()> {
-		match self.sub {
-			SubCommand::V1(V1Command { sub }) => sub.run(),
-		}
-	}
-}
-
-impl V1SubCommand {
-	pub fn run(self) -> Result<()> {
-		let pallet = match self {
-			V1SubCommand::Benchmark(V1BenchmarkCommand { sub }) => match sub {
-				BenchmarkCmd::Pallet(pallet) => pallet,
-				BenchmarkCmd::Overhead(overhead_cmd) => {
-					todo!()
-				},
-				_ =>
-					return Err(
-						"Only the `v1 benchmark pallet` command is currently supported".into()
-					),
-			},
-		};
-
-		if let Some(spec) = pallet.shared_params.chain {
-			return Err(format!(
-				"Chain specs are not supported. Please remove `--chain={spec}` and use \
+	pub fn run(&self) -> Result<()> {
+		match &self.sub {
+			SubCommand::V1(V1Command { sub }) => match sub {
+				V1SubCommand::Benchmark(V1BenchmarkCommand { sub }) => match sub {
+					BenchmarkCmd::Pallet(pallet) => {
+						if let Some(spec) = &pallet.shared_params.chain {
+							return Err(format!(
+									"Chain specs are not supported. Please remove `--chain={spec}` and use \
 				`--runtime=<PATH>` instead"
-			)
-			.into())
-		}
+								)
+							.into())
+						}
 
-		pallet.run_with_spec::<BlakeTwo256, HostFunctions>(None)
+						pallet.run_with_spec::<BlakeTwo256, HostFunctions>(None)
+					},
+					BenchmarkCmd::Overhead(overhead_cmd) => {
+						let runtime = sc_cli::build_runtime().expect("Can build tokio runtime");
+						let config = overhead_cmd
+							.create_configuration(self, runtime.handle().clone())
+							.expect("Can build config");
+						overhead_cmd.run_with_spec(config, None)
+					},
+					_ =>
+						return Err(
+							"Only the `v1 benchmark pallet` command is currently supported".into()
+						),
+				},
+			},
+		}
 	}
 }
+//
+// impl V1SubCommand {
+// 	pub fn run(self) -> Result<()> {
+// 		match self {
+// 			V1SubCommand::Benchmark(V1BenchmarkCommand { sub }) => match sub {
+// 				BenchmarkCmd::Pallet(pallet) => {
+// 					if let Some(spec) = pallet.shared_params.chain {
+// 						return Err(format!(
+// 							"Chain specs are not supported. Please remove `--chain={spec}` and use \
+// 				`--runtime=<PATH>` instead"
+// 						)
+// 						.into())
+// 					}
+//
+// 					pallet.run_with_spec::<BlakeTwo256, HostFunctions>(None)
+// 				},
+// 				BenchmarkCmd::Overhead(overhead_cmd) => overhead_cmd.run_with_spec(None),
+// 				_ =>
+// 					return Err(
+// 						"Only the `v1 benchmark pallet` command is currently supported".into()
+// 					),
+// 			},
+// 		}
+// 	}
+// }

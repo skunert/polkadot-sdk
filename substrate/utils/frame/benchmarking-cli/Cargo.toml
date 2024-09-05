@@ -56,8 +56,15 @@ sp-runtime = { workspace = true, default-features = true }
 sp-state-machine = { workspace = true, default-features = true }
 sp-storage = { workspace = true, default-features = true }
 sp-trie = { workspace = true, default-features = true }
+sp-block-builder = { workspace = true, default-features = true }
+sp-weights = { workspace = true, default-features = true }
+sp-transaction-pool = { workspace = true, default-features = true }
+sp-version = { workspace = true, default-features = true }
 sp-io = { workspace = true, default-features = true }
 sp-wasm-interface = { workspace = true, default-features = true }
+subxt = { workspace = true, features = ["substrate-compat"] }
+subxt-signer = { workspace = true }
+cumulus-primitives-proof-size-hostfunction = { workspace = true }
 gethostname = { workspace = true }
 
 [features]

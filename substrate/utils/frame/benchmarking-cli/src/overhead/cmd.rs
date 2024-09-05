@@ -18,17 +18,17 @@
 //! Contains the [`OverheadCmd`] as entry point for the CLI to execute
 //! the *overhead* benchmarks.
 
+use codec::Decode;
 use sc_block_builder::BlockBuilderApi;
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
 use sc_client_api::UsageProvider;
-use sc_service::Configuration;
-use sp_api::{ApiExt, CallApiAt, ProvideRuntimeApi};
+use sc_service::{Configuration, TFullClient};
+use sp_api::{ApiExt, CallApiAt, Core, Metadata, ProvideRuntimeApi};
 use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
-
-use clap::{Args, Parser};
-use log::info;
-use serde::Serialize;
-use std::{fmt::Debug, path::PathBuf, sync::Arc};
+use subxt::{
+	config::substrate::SubstrateExtrinsicParamsBuilder,
+	ext::frame_metadata::RuntimeMetadataPrefixed, tx::PairSigner, OfflineClient, SubstrateConfig,
+};
 
 use crate::{
 	extrinsic::{
@@ -38,6 +38,12 @@ use crate::{
 	overhead::template::TemplateData,
 	shared::{HostInfoParams, WeightParams},
 };
+use clap::{Args, Parser};
+use frame_support::__private::sp_tracing::tracing;
+use log::info;
+use sc_executor::WasmExecutor;
+use serde::Serialize;
+use std::{fmt::Debug, path::PathBuf, sync::Arc};
 
 /// Benchmark the execution overhead per-block and per-extrinsic.
 #[derive(Debug, Parser)]
@@ -81,6 +87,9 @@ pub struct OverheadParams {
 	/// This should only be used for performance analysis and not for final results.
 	#[arg(long)]
 	pub enable_trie_cache: bool,
+
+	#[arg(long, value_name = "PATH")]
+	pub runtime: Option<PathBuf>,
 }
 
 /// Type of a benchmark.
@@ -93,6 +102,17 @@ pub(crate) enum BenchmarkType {
 }
 
 impl OverheadCmd {
+	pub fn run_with_spec(&self, config: Configuration, p0: Option<()>) -> Result<()> {
+		let executor = WasmExecutor::<HostFunctions>::builder().build();
+
+		let (client, backend, keystore_container, task_manager) = sc_service::new_full_parts::<
+			opaque::Block,
+			super::fake_runtime_api::aura::RuntimeApi,
+			_,
+		>(&config, None, executor)
+		.expect("We are able to build the client; qed");
+		Ok(())
+	}
 	/// Measure the per-block and per-extrinsic execution overhead.
 	///
 	/// Writes the results to console and into two instances of the
@@ -162,6 +182,83 @@ impl BenchmarkType {
 	}
 }
 
+pub mod opaque {
+	use super::*;
+	use sp_runtime::{generic, traits::BlakeTwo256, OpaqueExtrinsic};
+
+	/// Block number
+	pub type BlockNumber = u32;
+	/// Opaque block header type.
+	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
+	/// Opaque block type.
+	pub type Block = generic::Block<Header, OpaqueExtrinsic>;
+	/// Opaque block identifier type.
+	pub type BlockId = generic::BlockId<Block>;
+}
+
+pub type HostFunctions = (
+	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	sp_io::SubstrateHostFunctions,
+);
+pub type ParachainClient<RuntimeApi> =
+	TFullClient<opaque::Block, RuntimeApi, WasmExecutor<HostFunctions>>;
+struct DynamicRemarkBuilder<Client> {
+	client: Arc<Client>,
+}
+
+impl<Client> ExtrinsicBuilder for DynamicRemarkBuilder<Client>
+where
+	Client: UsageProvider<opaque::Block>,
+	Client: ProvideRuntimeApi<opaque::Block>,
+	Client::Api: Metadata<opaque::Block> + Core<opaque::Block>,
+{
+	fn pallet(&self) -> &str {
+		"system"
+	}
+
+	fn extrinsic(&self) -> &str {
+		"remark"
+	}
+
+	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
+		// We apply the extrinsic directly, so let's take some random period.
+		let genesis = self.client.usage_info().chain.best_hash;
+
+		let api = self.client.runtime_api();
+		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
+
+		let Some(latest) = supported_metadata_versions.pop() else {
+			return Err("No metadata version is supported");
+		};
+
+		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
+			return Err("Unable to fetch metadata");
+		};
+
+		let version = api.version(genesis).unwrap();
+
+		let runtime_version = subxt::client::RuntimeVersion {
+			spec_version: version.spec_version,
+			transaction_version: version.transaction_version,
+		};
+
+		let signer = subxt_signer::sr25519::dev::bob();
+		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
+			.map_err(|e| tracing::error!("Error {e}"))
+			.unwrap();
+
+		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
+		let offline: OfflineClient<SubstrateConfig> =
+			OfflineClient::new(genesis, runtime_version, metadata);
+
+		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce.into()).build();
+		// Default transaction parameters assume a nonce of 0.
+		let transaction = offline.tx().create_signed_offline(&dynamic_tx, &signer, params).unwrap();
+		let mut encoded = transaction.into_encoded();
+
+		OpaqueExtrinsic::from_bytes(&mut encoded).map_err(|_| "Unable to construct OpaqueExtrinsic")
+	}
+}
 // Boilerplate
 impl CliConfiguration for OverheadCmd {
 	fn shared_params(&self) -> &SharedParams {
