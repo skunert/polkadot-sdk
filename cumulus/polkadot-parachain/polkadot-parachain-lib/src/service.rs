@@ -52,6 +52,7 @@ use cumulus_client_parachain_inherent::ParachainInherentData;
 use frame_benchmarking_cli::StorageCmd;
 use frame_benchmarking_cli::{BlockCmd, ExtrinsicBuilder, OverheadCmd};
 use futures::prelude::*;
+use parachains_common::opaque;
 use polkadot_cli::IdentifyVariant;
 use polkadot_primitives::{CollatorPair, PersistedValidationData};
 use prometheus_endpoint::Registry;
@@ -69,14 +70,21 @@ use sc_sysinfo::HwBench;
 use sc_telemetry::{Telemetry, TelemetryHandle, TelemetryWorker, TelemetryWorkerHandle};
 use sc_transaction_pool::FullPool;
 use sp_api::{Core, Metadata, ProvideRuntimeApi};
-use sp_core::Pair;
+use sp_core::{crypto::AccountId32, Pair, H256};
 use sp_inherents::{CreateInherentDataProviders, InherentDataProvider};
 use sp_keystore::KeystorePtr;
-use sp_runtime::{app_crypto::AppCrypto, traits::Header as HeaderT, OpaqueExtrinsic};
+use sp_runtime::{
+	app_crypto::AppCrypto, traits::Header as HeaderT, MultiSignature, OpaqueExtrinsic,
+};
 use std::{marker::PhantomData, pin::Pin, sync::Arc, time::Duration};
 use subxt::{
-	config::substrate::SubstrateExtrinsicParamsBuilder,
-	ext::frame_metadata::RuntimeMetadataPrefixed, tx::PairSigner, OfflineClient, SubstrateConfig,
+	config::{
+		substrate::{BlakeTwo256, SubstrateExtrinsicParamsBuilder, SubstrateHeader},
+		SubstrateExtrinsicParams,
+	},
+	ext::frame_metadata::RuntimeMetadataPrefixed,
+	tx::{PairSigner, Signer},
+	Config, OfflineClient, SubstrateConfig,
 };
 
 #[cfg(not(feature = "runtime-benchmarks"))]
@@ -1035,7 +1043,6 @@ where
 		let genesis = client.usage_info().chain.best_hash;
 		let header = client.header(genesis).unwrap().unwrap();
 		let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
-		// relay_state.para_id = rococo_parachain_runtime::PARA
 		relay_state.included_para_head = Some(header.encode().into());
 		relay_state.para_id = ParaId::from(cmd.params.bench.para_id);
 		let mut vfp = PersistedValidationData::default();
@@ -1088,14 +1095,45 @@ where
 	}
 }
 
-struct ParaRemarkBuilder<RuntimeApi> {
-	client: Arc<ParachainClient<RuntimeApi>>,
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum RemarkConfig {}
+
+impl Config for RemarkConfig {
+	type Hash = H256;
+	type AccountId = AccountId32;
+	// type Address = MultiAddress<Self::AccountId, u32>;
+	type Address = Self::AccountId;
+	type Signature = MultiSignature;
+	type Hasher = BlakeTwo256;
+	type Header = SubstrateHeader<u32, BlakeTwo256>;
+	type ExtrinsicParams = SubstrateExtrinsicParams<Self>;
+	type AssetId = u32;
 }
 
-impl<RuntimeApi> ExtrinsicBuilder for ParaRemarkBuilder<RuntimeApi>
+struct MySigner(pub sp_core::sr25519::Pair);
+
+impl Signer<RemarkConfig> for MySigner {
+	fn account_id(&self) -> <RemarkConfig as Config>::AccountId {
+		self.0.public().0.into()
+	}
+
+	fn address(&self) -> <RemarkConfig as Config>::Address {
+		self.0.public().0.into()
+	}
+
+	fn sign(&self, signer_payload: &[u8]) -> <RemarkConfig as Config>::Signature {
+		self.0.sign(signer_payload).into()
+	}
+}
+struct DynamicRemarkBuilder<Client> {
+	client: Arc<Client>,
+}
+
+impl<Client> ExtrinsicBuilder for DynamicRemarkBuilder<Client>
 where
-	RuntimeApi: ConstructNodeRuntimeApi<Block, ParachainClient<RuntimeApi>>,
-	RuntimeApi::RuntimeApi: Metadata<Block>,
+	Client: UsageProvider<opaque::Block>,
+	Client: ProvideRuntimeApi<opaque::Block>,
+	Client::Api: Metadata<opaque::Block> + Core<opaque::Block>,
 {
 	fn pallet(&self) -> &str {
 		"system"
@@ -1105,61 +1143,42 @@ where
 		"remark"
 	}
 
-	fn build(&self, nonce: u32) -> Result<OpaqueExtrinsic, &'static str> {
+	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
 		// We apply the extrinsic directly, so let's take some random period.
-		let period = 128;
 		let genesis = self.client.usage_info().chain.best_hash;
-		let signer = sp_keyring::Sr25519Keyring::Bob.pair();
 
-		let runtime_version = subxt::client::RuntimeVersion {
-			spec_version: rococo_parachain_runtime::VERSION.spec_version,
-			transaction_version: rococo_parachain_runtime::VERSION.transaction_version,
+		let api = self.client.runtime_api();
+		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
+
+		let Some(latest) = supported_metadata_versions.pop() else {
+			return Err("No metadata version is supported");
 		};
 
-		let extra: rococo_parachain_runtime::SignedExtra =
-			(
-				frame_system::CheckNonZeroSender::<rococo_parachain_runtime::Runtime>::new(),
-				frame_system::CheckSpecVersion::<rococo_parachain_runtime::Runtime>::new(),
-				frame_system::CheckTxVersion::<rococo_parachain_runtime::Runtime>::new(),
-				frame_system::CheckGenesis::<rococo_parachain_runtime::Runtime>::new(),
-				frame_system::CheckEra::<rococo_parachain_runtime::Runtime>::from(
-					sp_runtime::generic::Era::immortal(),
-				),
-				frame_system::CheckNonce::<rococo_parachain_runtime::Runtime>::from(nonce),
-				frame_system::CheckWeight::<rococo_parachain_runtime::Runtime>::new(),
-				pallet_transaction_payment::ChargeTransactionPayment::<
-					rococo_parachain_runtime::Runtime,
-				>::from(0),
-				cumulus_primitives_storage_weight_reclaim::StorageWeightReclaim::<
-					rococo_parachain_runtime::Runtime,
-				>::new(),
-			);
-		let call = rococo_parachain_runtime::RuntimeCall::System(frame_system::Call::remark {
-			remark: vec![],
-		});
-		let payload = sp_runtime::generic::SignedPayload::from_raw(
-			call.clone(),
-			extra.clone(),
-			(
-				(),
-				rococo_parachain_runtime::VERSION.spec_version,
-				rococo_parachain_runtime::VERSION.transaction_version,
-				genesis,
-				genesis,
-				(),
-				(),
-				(),
-				(),
-			),
-		);
-		let signature = payload.using_encoded(|p| signer.sign(p));
-		let unchecked_extrinsic = rococo_parachain_runtime::UncheckedExtrinsic::new_signed(
-			call,
-			sp_runtime::AccountId32::from(signer.public()).into(),
-			sp_runtime::MultiSignature::Sr25519(signature),
-			extra,
-		);
-		let encoded = unchecked_extrinsic.clone().encode();
-		Ok(unchecked_extrinsic.into())
+		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
+			return Err("Unable to fetch metadata");
+		};
+
+		let version = api.version(genesis).unwrap();
+
+		let runtime_version = subxt::client::RuntimeVersion {
+			spec_version: version.spec_version,
+			transaction_version: version.transaction_version,
+		};
+
+		let pair = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
+		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
+			.map_err(|e| tracing::error!("Error {e}"))
+			.unwrap();
+
+		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
+		let offline: OfflineClient<RemarkConfig> =
+			OfflineClient::new(genesis, runtime_version, metadata);
+
+		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce.into()).build();
+		// Default transaction parameters assume a nonce of 0.
+		let transaction = offline.tx().create_signed_offline(&dynamic_tx, &pair, params).unwrap();
+		let mut encoded = transaction.into_encoded();
+
+		OpaqueExtrinsic::from_bytes(&mut encoded).map_err(|_| "Unable to construct OpaqueExtrinsic")
 	}
 }

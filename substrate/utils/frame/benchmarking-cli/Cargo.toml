@@ -60,11 +60,17 @@ sp-block-builder = { workspace = true, default-features = true }
 sp-weights = { workspace = true, default-features = true }
 sp-transaction-pool = { workspace = true, default-features = true }
 sp-version = { workspace = true, default-features = true }
+sp-timestamp = { workspace = true, default-features = true }
 sp-io = { workspace = true, default-features = true }
+sp-keyring = { workspace = true, default-features = true }
 sp-wasm-interface = { workspace = true, default-features = true }
 subxt = { workspace = true, features = ["substrate-compat"] }
 subxt-signer = { workspace = true }
 cumulus-primitives-proof-size-hostfunction = { workspace = true }
+cumulus-primitives-parachain-inherent = { workspace = true, default-features = true }
+polkadot-parachain-primitives = { workspace = true, default-features = true }
+polkadot-primitives = { workspace = true, default-features = true }
+cumulus-test-relay-sproof-builder = { workspace = true, default-features = true }
 gethostname = { workspace = true }
 
 [features]

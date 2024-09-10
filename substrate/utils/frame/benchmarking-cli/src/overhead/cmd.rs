@@ -18,18 +18,6 @@
 //! Contains the [`OverheadCmd`] as entry point for the CLI to execute
 //! the *overhead* benchmarks.
 
-use codec::Decode;
-use sc_block_builder::BlockBuilderApi;
-use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
-use sc_client_api::UsageProvider;
-use sc_service::{Configuration, TFullClient};
-use sp_api::{ApiExt, CallApiAt, Core, Metadata, ProvideRuntimeApi};
-use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
-use subxt::{
-	config::substrate::SubstrateExtrinsicParamsBuilder,
-	ext::frame_metadata::RuntimeMetadataPrefixed, tx::PairSigner, OfflineClient, SubstrateConfig,
-};
-
 use crate::{
 	extrinsic::{
 		bench::{Benchmark, BenchmarkParams as ExtrinsicBenchmarkParams},
@@ -39,11 +27,34 @@ use crate::{
 	shared::{HostInfoParams, WeightParams},
 };
 use clap::{Args, Parser};
+use codec::{Decode, Encode};
 use frame_support::__private::sp_tracing::tracing;
 use log::info;
+use polkadot_parachain_primitives::primitives::Id as ParaId;
+use polkadot_primitives::v7::PersistedValidationData;
+use sc_block_builder::BlockBuilderApi;
+use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
+use sc_client_api::UsageProvider;
 use sc_executor::WasmExecutor;
+use sc_service::{Configuration, TFullClient};
 use serde::Serialize;
+use sp_api::{ApiExt, CallApiAt, Core, Metadata, ProvideRuntimeApi};
+use sp_blockchain::HeaderBackend;
+use sp_core::{crypto::AccountId32, offchain::Duration, Pair, H256};
+use sp_inherents::InherentDataProvider;
+use sp_runtime::{traits::Block as BlockT, DigestItem, MultiSignature, OpaqueExtrinsic};
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
+use subxt::{
+	client::RuntimeVersion,
+	config::{
+		substrate::{BlakeTwo256, SubstrateExtrinsicParamsBuilder, SubstrateHeader},
+		SubstrateExtrinsicParams,
+	},
+	ext::{frame_metadata::RuntimeMetadataPrefixed, futures},
+	tx::{PairSigner, Signer},
+	utils::MultiAddress,
+	Config, OfflineClient, SubstrateConfig,
+};
 
 /// Benchmark the execution overhead per-block and per-extrinsic.
 #[derive(Debug, Parser)]
@@ -105,13 +116,47 @@ impl OverheadCmd {
 	pub fn run_with_spec(&self, config: Configuration, p0: Option<()>) -> Result<()> {
 		let executor = WasmExecutor::<HostFunctions>::builder().build();
 
-		let (client, backend, keystore_container, task_manager) = sc_service::new_full_parts::<
-			opaque::Block,
-			super::fake_runtime_api::aura::RuntimeApi,
-			_,
-		>(&config, None, executor)
-		.expect("We are able to build the client; qed");
-		Ok(())
+		let (client, backend, keystore_container, task_manager) =
+			sc_service::new_full_parts_record_import::<
+				opaque::Block,
+				super::fake_runtime_api::aura::RuntimeApi,
+				_,
+			>(&config, None, executor, true)
+			.expect("We are able to build the client; qed");
+
+		let client = Arc::new(client);
+		let ext_builder = DynamicRemarkBuilder::new(client.clone());
+		let digest_items = Default::default();
+
+		let inherent_data = {
+			let genesis = client.usage_info().chain.best_hash;
+			let header = client.header(genesis).unwrap().unwrap();
+			let mut relay_state =
+				cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
+			relay_state.included_para_head = Some(header.encode().into());
+			relay_state.para_id = ParaId::from(self.params.bench.para_id);
+
+			let mut vfp = PersistedValidationData::default();
+			let (root, proof) = relay_state.into_state_root_and_proof();
+			vfp.relay_parent_storage_root = root;
+			let para_data = cumulus_primitives_parachain_inherent::ParachainInherentData {
+				validation_data: vfp,
+				relay_chain_state: proof,
+				downward_messages: Default::default(),
+				horizontal_messages: Default::default(),
+			};
+
+			let mut inherent_data = sp_inherents::InherentData::new();
+			let timestamp =
+				sp_timestamp::InherentDataProvider::new(std::time::Duration::default().into());
+			let _ =
+				futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
+			let _ =
+				futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
+			inherent_data
+		};
+
+		self.run(config, client, inherent_data, digest_items, &ext_builder)
 	}
 	/// Measure the per-block and per-extrinsic execution overhead.
 	///
@@ -202,16 +247,72 @@ pub type HostFunctions = (
 );
 pub type ParachainClient<RuntimeApi> =
 	TFullClient<opaque::Block, RuntimeApi, WasmExecutor<HostFunctions>>;
-struct DynamicRemarkBuilder<Client> {
-	client: Arc<Client>,
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum CumulusTestRuntimeConfig {}
+
+impl Config for CumulusTestRuntimeConfig {
+	type Hash = H256;
+	type AccountId = AccountId32;
+	// type Address = MultiAddress<Self::AccountId, u32>;
+	type Address = Self::AccountId;
+	type Signature = MultiSignature;
+	type Hasher = BlakeTwo256;
+	type Header = SubstrateHeader<u32, BlakeTwo256>;
+	type ExtrinsicParams = SubstrateExtrinsicParams<Self>;
+	type AssetId = u32;
 }
 
-impl<Client> ExtrinsicBuilder for DynamicRemarkBuilder<Client>
-where
-	Client: UsageProvider<opaque::Block>,
-	Client: ProvideRuntimeApi<opaque::Block>,
-	Client::Api: Metadata<opaque::Block> + Core<opaque::Block>,
-{
+struct MySigner(pub sp_core::sr25519::Pair);
+
+impl Signer<CumulusTestRuntimeConfig> for MySigner {
+	fn account_id(&self) -> <CumulusTestRuntimeConfig as Config>::AccountId {
+		self.0.public().0.into()
+	}
+
+	fn address(&self) -> <CumulusTestRuntimeConfig as Config>::Address {
+		self.0.public().0.into()
+	}
+
+	fn sign(&self, signer_payload: &[u8]) -> <CumulusTestRuntimeConfig as Config>::Signature {
+		self.0.sign(signer_payload).into()
+	}
+}
+struct DynamicRemarkBuilder<Config: subxt::Config<Hash = H256>> {
+	offline_client: OfflineClient<Config>,
+}
+
+impl<Config: subxt::Config<Hash = H256>> DynamicRemarkBuilder<Config> {
+	fn new<Client>(client: Arc<Client>) -> Self
+	where
+		Client: UsageProvider<opaque::Block> + HeaderBackend<opaque::Block>,
+		Client: ProvideRuntimeApi<opaque::Block>,
+		Client::Api: Metadata<opaque::Block> + Core<opaque::Block>,
+	{
+		let genesis = client.usage_info().chain.best_hash;
+		let api = client.runtime_api();
+		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
+		let Some(latest) = supported_metadata_versions.pop() else {
+			panic!("No metadata version is supported");
+		};
+		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
+			panic!("Unable to fetch metadata");
+		};
+		let version = api.version(genesis).unwrap();
+		let runtime_version = RuntimeVersion {
+			spec_version: version.spec_version,
+			transaction_version: version.transaction_version,
+		};
+		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
+			.map_err(|e| tracing::error!("Error {e}"))
+			.unwrap();
+
+		let offline_client: OfflineClient<Config> =
+			OfflineClient::new(genesis, runtime_version, metadata);
+		Self { offline_client }
+	}
+}
+impl ExtrinsicBuilder for DynamicRemarkBuilder<CumulusTestRuntimeConfig> {
 	fn pallet(&self) -> &str {
 		"system"
 	}
@@ -221,39 +322,17 @@ where
 	}
 
 	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
-		// We apply the extrinsic directly, so let's take some random period.
-		let genesis = self.client.usage_info().chain.best_hash;
-
-		let api = self.client.runtime_api();
-		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
-
-		let Some(latest) = supported_metadata_versions.pop() else {
-			return Err("No metadata version is supported");
-		};
-
-		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
-			return Err("Unable to fetch metadata");
-		};
-
-		let version = api.version(genesis).unwrap();
-
-		let runtime_version = subxt::client::RuntimeVersion {
-			spec_version: version.spec_version,
-			transaction_version: version.transaction_version,
-		};
-
-		let signer = subxt_signer::sr25519::dev::bob();
-		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
-			.map_err(|e| tracing::error!("Error {e}"))
-			.unwrap();
-
+		let signer = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
 		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
-		let offline: OfflineClient<SubstrateConfig> =
-			OfflineClient::new(genesis, runtime_version, metadata);
 
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce.into()).build();
+
 		// Default transaction parameters assume a nonce of 0.
-		let transaction = offline.tx().create_signed_offline(&dynamic_tx, &signer, params).unwrap();
+		let transaction = self
+			.offline_client
+			.tx()
+			.create_signed_offline(&dynamic_tx, &signer, params)
+			.unwrap();
 		let mut encoded = transaction.into_encoded();
 
 		OpaqueExtrinsic::from_bytes(&mut encoded).map_err(|_| "Unable to construct OpaqueExtrinsic")
