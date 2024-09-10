@@ -45,10 +45,10 @@ use sp_inherents::InherentDataProvider;
 use sp_runtime::{traits::Block as BlockT, DigestItem, MultiSignature, OpaqueExtrinsic};
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
 use subxt::{
-	client::RuntimeVersion,
+	client::{OfflineClientT, RuntimeVersion},
 	config::{
 		substrate::{BlakeTwo256, SubstrateExtrinsicParamsBuilder, SubstrateHeader},
-		SubstrateExtrinsicParams,
+		ExtrinsicParams, SubstrateExtrinsicParams,
 	},
 	ext::{frame_metadata::RuntimeMetadataPrefixed, futures},
 	tx::{PairSigner, Signer},
@@ -101,8 +101,16 @@ pub struct OverheadParams {
 
 	#[arg(long, value_name = "PATH")]
 	pub runtime: Option<PathBuf>,
+
+	#[arg(long)]
+	pub address_type: Option<AddressType>,
 }
 
+#[derive(Debug, Clone, PartialEq, clap::ValueEnum, Serialize)]
+enum AddressType {
+	MultiAddress,
+	AccountId,
+}
 /// Type of a benchmark.
 #[derive(Serialize, Clone, PartialEq, Copy)]
 pub(crate) enum BenchmarkType {
@@ -125,7 +133,13 @@ impl OverheadCmd {
 			.expect("We are able to build the client; qed");
 
 		let client = Arc::new(client);
-		let ext_builder = DynamicRemarkBuilder::new(client.clone());
+		let ext_builder: Box<dyn ExtrinsicBuilder> = match self.params.address_type {
+			Some(AddressType::AccountId) =>
+				Box::new(DynamicRemarkBuilder::<AddressAccountIdConfig>::new(client.clone())),
+			Some(AddressType::MultiAddress) | None =>
+				Box::new(DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(client.clone())),
+		};
+
 		let digest_items = Default::default();
 
 		let inherent_data = {
@@ -156,7 +170,7 @@ impl OverheadCmd {
 			inherent_data
 		};
 
-		self.run(config, client, inherent_data, digest_items, &ext_builder)
+		self.run(config, client, inherent_data, digest_items, &*ext_builder)
 	}
 	/// Measure the per-block and per-extrinsic execution overhead.
 	///
@@ -249,9 +263,9 @@ pub type ParachainClient<RuntimeApi> =
 	TFullClient<opaque::Block, RuntimeApi, WasmExecutor<HostFunctions>>;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum CumulusTestRuntimeConfig {}
+pub enum AddressAccountIdConfig {}
 
-impl Config for CumulusTestRuntimeConfig {
+impl Config for AddressAccountIdConfig {
 	type Hash = H256;
 	type AccountId = AccountId32;
 	// type Address = MultiAddress<Self::AccountId, u32>;
@@ -263,26 +277,42 @@ impl Config for CumulusTestRuntimeConfig {
 	type AssetId = u32;
 }
 
+pub enum MultiAddressAccountIdConfig {}
+
+impl Config for MultiAddressAccountIdConfig {
+	type Hash = H256;
+	type AccountId = AccountId32;
+	type Address = MultiAddress<Self::AccountId, u32>;
+	type Signature = MultiSignature;
+	type Hasher = BlakeTwo256;
+	type Header = SubstrateHeader<u32, BlakeTwo256>;
+	type ExtrinsicParams = SubstrateExtrinsicParams<Self>;
+	type AssetId = u32;
+}
+
 struct MySigner(pub sp_core::sr25519::Pair);
 
-impl Signer<CumulusTestRuntimeConfig> for MySigner {
-	fn account_id(&self) -> <CumulusTestRuntimeConfig as Config>::AccountId {
+impl<C: Config<Hash = H256, AccountId = AccountId32, Signature = MultiSignature>> Signer<C>
+	for MySigner
+{
+	fn account_id(&self) -> C::AccountId {
 		self.0.public().0.into()
 	}
 
-	fn address(&self) -> <CumulusTestRuntimeConfig as Config>::Address {
-		self.0.public().0.into()
+	fn address(&self) -> C::Address {
+		C::Address::from(<MySigner as subxt::tx::Signer<C>>::account_id(self))
 	}
 
-	fn sign(&self, signer_payload: &[u8]) -> <CumulusTestRuntimeConfig as Config>::Signature {
+	fn sign(&self, signer_payload: &[u8]) -> C::Signature {
 		self.0.sign(signer_payload).into()
 	}
 }
-struct DynamicRemarkBuilder<Config: subxt::Config<Hash = H256>> {
-	offline_client: OfflineClient<Config>,
+
+struct DynamicRemarkBuilder<C: Config<Hash = H256>> {
+	offline_client: OfflineClient<C>,
 }
 
-impl<Config: subxt::Config<Hash = H256>> DynamicRemarkBuilder<Config> {
+impl<C: Config<Hash = H256>> DynamicRemarkBuilder<C> {
 	fn new<Client>(client: Arc<Client>) -> Self
 	where
 		Client: UsageProvider<opaque::Block> + HeaderBackend<opaque::Block>,
@@ -307,12 +337,21 @@ impl<Config: subxt::Config<Hash = H256>> DynamicRemarkBuilder<Config> {
 			.map_err(|e| tracing::error!("Error {e}"))
 			.unwrap();
 
-		let offline_client: OfflineClient<Config> =
+		let offline_client: OfflineClient<C> =
 			OfflineClient::new(genesis, runtime_version, metadata);
 		Self { offline_client }
 	}
 }
-impl ExtrinsicBuilder for DynamicRemarkBuilder<CumulusTestRuntimeConfig> {
+
+impl<
+		C: Config<
+			Hash = H256,
+			AccountId = AccountId32,
+			Signature = MultiSignature,
+			ExtrinsicParams = SubstrateExtrinsicParams<C>,
+		>,
+	> ExtrinsicBuilder for DynamicRemarkBuilder<C>
+{
 	fn pallet(&self) -> &str {
 		"system"
 	}
@@ -325,7 +364,8 @@ impl ExtrinsicBuilder for DynamicRemarkBuilder<CumulusTestRuntimeConfig> {
 		let signer = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
 		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
 
-		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce.into()).build();
+		let client_state = self.offline_client.client_state();
+		let params = SubstrateExtrinsicParamsBuilder::<C>::new().nonce(nonce.into()).build();
 
 		// Default transaction parameters assume a nonce of 0.
 		let transaction = self
