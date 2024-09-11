@@ -18,7 +18,6 @@
 //! Converts a benchmark result into [`TemplateData`] and writes
 //! it into the `weights.hbs` template.
 
-use frame_support::pallet_prelude::Weight;
 use sc_cli::Result;
 use sc_service::Configuration;
 

@@ -18,14 +18,14 @@
 //! the native runtimes.
 
 use super::super::cmd::opaque::Block;
-use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
+use sp_core::OpaqueMetadata;
 use sp_runtime::{
 	traits::Block as BlockT,
 	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult,
 };
-use sp_weights::Weight;
 
+#[allow(unused)]
 pub struct Runtime;
 
 sp_api::impl_runtime_apis! {

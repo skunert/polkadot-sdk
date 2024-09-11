@@ -23,8 +23,8 @@ use crate::{
 		bench::{Benchmark, BenchmarkParams as ExtrinsicBenchmarkParams},
 		ExtrinsicBuilder,
 	},
-	overhead::template::TemplateData,
-	shared::{HostInfoParams, WeightParams},
+	overhead::{fake_runtime_api, template::TemplateData},
+	shared::{GenesisBuilder, HostInfoParams, WeightParams},
 };
 use clap::{Args, Parser};
 use codec::{Decode, Encode};
@@ -33,14 +33,15 @@ use log::info;
 use polkadot_parachain_primitives::primitives::Id as ParaId;
 use polkadot_primitives::v7::PersistedValidationData;
 use sc_block_builder::BlockBuilderApi;
+use sc_chain_spec::GenesisBlockBuilder;
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
 use sc_client_api::UsageProvider;
 use sc_executor::WasmExecutor;
-use sc_service::{Configuration, TFullClient};
+use sc_service::{new_db_backend, new_full_parts_with_genesis_builder, Configuration, TFullClient};
 use serde::Serialize;
 use sp_api::{ApiExt, CallApiAt, Core, Metadata, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
-use sp_core::{crypto::AccountId32, offchain::Duration, Pair, H256};
+use sp_core::{crypto::AccountId32, Pair, H256};
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{traits::Block as BlockT, DigestItem, MultiSignature, OpaqueExtrinsic};
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
@@ -48,12 +49,12 @@ use subxt::{
 	client::RuntimeVersion,
 	config::{
 		substrate::{BlakeTwo256, SubstrateExtrinsicParamsBuilder, SubstrateHeader},
-		ExtrinsicParams, SubstrateExtrinsicParams,
+		SubstrateExtrinsicParams,
 	},
-	ext::{frame_metadata::RuntimeMetadataPrefixed, futures},
-	tx::{PairSigner, Signer},
+	ext::futures,
+	tx::Signer,
 	utils::MultiAddress,
-	Config, OfflineClient, SubstrateConfig,
+	Config, OfflineClient,
 };
 
 /// Benchmark the execution overhead per-block and per-extrinsic.
@@ -102,12 +103,18 @@ pub struct OverheadParams {
 	#[arg(long, value_name = "PATH")]
 	pub runtime: Option<PathBuf>,
 
+	/// How to construct the genesis state.
+	///
+	/// Uses `GenesisBuilder::Spec` by default and  `GenesisBuilder::Runtime` if `runtime` is set.
+	#[arg(long, value_enum)]
+	pub genesis_builder: Option<GenesisBuilder>,
+
 	#[arg(long)]
 	pub address_type: Option<AddressType>,
 }
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum, Serialize)]
-enum AddressType {
+pub enum AddressType {
 	MultiAddress,
 	AccountId,
 }
@@ -158,15 +165,26 @@ impl OverheadCmd {
 	) -> Result<()> {
 		let executor = WasmExecutor::<HostFunctions>::builder().build();
 
+		let backend = new_db_backend(config.db_config())?;
+		let genesis_block_builder = GenesisBlockBuilder::new(
+			config.chain_spec.as_storage_builder(),
+			!config.no_genesis(),
+			backend.clone(),
+			executor.clone(),
+		)?;
 		let (client, _backend, _keystore_container, _task_manager) =
-			sc_service::new_full_parts_record_import::<
-				opaque::Block,
-				super::fake_runtime_api::aura::RuntimeApi,
-				_,
-			>(&config, None, executor, true)
-			.expect("We are able to build the client; qed");
+			new_full_parts_with_genesis_builder(
+				&config,
+				None,
+				executor,
+				backend,
+				genesis_block_builder,
+				// TODO: Change this depending on parachain or not
+				true,
+			)
+			.expect("Can build");
 
-		let client = Arc::new(client);
+		let client: Arc<ParachainClient<fake_runtime_api::aura::RuntimeApi>> = Arc::new(client);
 		let ext_builder: Box<dyn ExtrinsicBuilder> = match (ext_builder, &self.params.address_type)
 		{
 			(Some(ext_builder), _) => ext_builder,
@@ -252,7 +270,6 @@ impl BenchmarkType {
 }
 
 pub mod opaque {
-	use super::*;
 	use sp_runtime::{generic, traits::BlakeTwo256, OpaqueExtrinsic};
 
 	/// Block number
@@ -261,8 +278,6 @@ pub mod opaque {
 	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
 	/// Opaque block type.
 	pub type Block = generic::Block<Header, OpaqueExtrinsic>;
-	/// Opaque block identifier type.
-	pub type BlockId = generic::BlockId<Block>;
 }
 
 pub type HostFunctions = (

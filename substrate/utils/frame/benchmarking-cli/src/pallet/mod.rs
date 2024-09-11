@@ -19,7 +19,7 @@ mod command;
 mod types;
 mod writer;
 
-use crate::{pallet::types::GenesisBuilder, shared::HostInfoParams};
+use crate::shared::{GenesisBuilder, HostInfoParams};
 use clap::ValueEnum;
 use sc_cli::{
 	WasmExecutionMethod, WasmtimeInstantiationStrategy, DEFAULT_WASMTIME_INSTANTIATION_STRATEGY,

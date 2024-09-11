@@ -132,3 +132,18 @@ impl HostInfoParams {
 		gather_sysinfo().cpu.unwrap_or(self.cpuname_fallback.clone())
 	}
 }
+
+/// How the genesis state for benchmarking should be build.
+#[derive(clap::ValueEnum, Serialize, Debug, Eq, PartialEq, Clone, Copy)]
+#[clap(rename_all = "kebab-case")]
+pub enum GenesisBuilder {
+	/// Do not provide any genesis state.
+	///
+	/// Benchmarks are advised to function with this, since they should setup their own required
+	/// state. However, to keep backwards compatibility, this is not the default.
+	None,
+	/// Let the runtime build the genesis state through its `BuildGenesisConfig` runtime API.
+	Runtime,
+	/// Use the spec file to build the genesis state. This fails when there is no spec.
+	Spec,
+}
