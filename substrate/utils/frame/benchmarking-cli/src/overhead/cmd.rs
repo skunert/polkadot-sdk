@@ -41,11 +41,11 @@ use serde::Serialize;
 use sp_api::{ApiExt, CallApiAt, Core, Metadata, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::{crypto::AccountId32, offchain::Duration, Pair, H256};
-use sp_inherents::InherentDataProvider;
+use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{traits::Block as BlockT, DigestItem, MultiSignature, OpaqueExtrinsic};
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
 use subxt::{
-	client::{OfflineClientT, RuntimeVersion},
+	client::RuntimeVersion,
 	config::{
 		substrate::{BlakeTwo256, SubstrateExtrinsicParamsBuilder, SubstrateHeader},
 		ExtrinsicParams, SubstrateExtrinsicParams,
@@ -120,11 +120,45 @@ pub(crate) enum BenchmarkType {
 	Block,
 }
 
+fn create_parachain_inherent_data<
+	Client: UsageProvider<Block> + HeaderBackend<Block>,
+	Block: BlockT,
+>(
+	client: &Client,
+	para_id: u32,
+) -> InherentData {
+	let genesis = client.usage_info().chain.best_hash;
+	let header = client.header(genesis).unwrap().unwrap();
+	let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
+	relay_state.included_para_head = Some(header.encode().into());
+	relay_state.para_id = ParaId::from(para_id);
+
+	let mut vfp = PersistedValidationData::default();
+	let (root, proof) = relay_state.into_state_root_and_proof();
+	vfp.relay_parent_storage_root = root;
+	let para_data = cumulus_primitives_parachain_inherent::ParachainInherentData {
+		validation_data: vfp,
+		relay_chain_state: proof,
+		downward_messages: Default::default(),
+		horizontal_messages: Default::default(),
+	};
+
+	let mut inherent_data = sp_inherents::InherentData::new();
+	let timestamp = sp_timestamp::InherentDataProvider::new(std::time::Duration::default().into());
+	let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
+	let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
+	inherent_data
+}
+
 impl OverheadCmd {
-	pub fn run_with_spec(&self, config: Configuration, p0: Option<()>) -> Result<()> {
+	pub fn run_with_spec(
+		&self,
+		config: Configuration,
+		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
+	) -> Result<()> {
 		let executor = WasmExecutor::<HostFunctions>::builder().build();
 
-		let (client, backend, keystore_container, task_manager) =
+		let (client, _backend, _keystore_container, _task_manager) =
 			sc_service::new_full_parts_record_import::<
 				opaque::Block,
 				super::fake_runtime_api::aura::RuntimeApi,
@@ -133,42 +167,18 @@ impl OverheadCmd {
 			.expect("We are able to build the client; qed");
 
 		let client = Arc::new(client);
-		let ext_builder: Box<dyn ExtrinsicBuilder> = match self.params.address_type {
-			Some(AddressType::AccountId) =>
+		let ext_builder: Box<dyn ExtrinsicBuilder> = match (ext_builder, &self.params.address_type)
+		{
+			(Some(ext_builder), _) => ext_builder,
+			(None, Some(AddressType::AccountId)) =>
 				Box::new(DynamicRemarkBuilder::<AddressAccountIdConfig>::new(client.clone())),
-			Some(AddressType::MultiAddress) | None =>
+			(None, Some(AddressType::MultiAddress)) | (None, None) =>
 				Box::new(DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(client.clone())),
 		};
 
 		let digest_items = Default::default();
 
-		let inherent_data = {
-			let genesis = client.usage_info().chain.best_hash;
-			let header = client.header(genesis).unwrap().unwrap();
-			let mut relay_state =
-				cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
-			relay_state.included_para_head = Some(header.encode().into());
-			relay_state.para_id = ParaId::from(self.params.bench.para_id);
-
-			let mut vfp = PersistedValidationData::default();
-			let (root, proof) = relay_state.into_state_root_and_proof();
-			vfp.relay_parent_storage_root = root;
-			let para_data = cumulus_primitives_parachain_inherent::ParachainInherentData {
-				validation_data: vfp,
-				relay_chain_state: proof,
-				downward_messages: Default::default(),
-				horizontal_messages: Default::default(),
-			};
-
-			let mut inherent_data = sp_inherents::InherentData::new();
-			let timestamp =
-				sp_timestamp::InherentDataProvider::new(std::time::Duration::default().into());
-			let _ =
-				futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
-			let _ =
-				futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
-			inherent_data
-		};
+		let inherent_data = create_parachain_inherent_data(&*client, self.params.bench.para_id);
 
 		self.run(config, client, inherent_data, digest_items, &*ext_builder)
 	}
@@ -364,7 +374,6 @@ impl<
 		let signer = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
 		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
 
-		let client_state = self.offline_client.client_state();
 		let params = SubstrateExtrinsicParamsBuilder::<C>::new().nonce(nonce.into()).build();
 
 		// Default transaction parameters assume a nonce of 0.

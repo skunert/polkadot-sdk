@@ -1175,7 +1175,6 @@ where
 			OfflineClient::new(genesis, runtime_version, metadata);
 
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce.into()).build();
-		// Default transaction parameters assume a nonce of 0.
 		let transaction = offline.tx().create_signed_offline(&dynamic_tx, &pair, params).unwrap();
 		let mut encoded = transaction.into_encoded();
 
