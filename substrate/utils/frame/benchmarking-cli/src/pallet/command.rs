@@ -44,6 +44,7 @@ use sp_genesis_builder::{PresetId, Result as GenesisBuildResult};
 use sp_keystore::{testing::MemoryKeystore, KeystoreExt};
 use sp_runtime::traits::Hash;
 use sp_state_machine::{OverlayedChanges, StateMachine};
+use sp_storage::well_known_keys::CODE;
 use sp_trie::{proof_size_extension::ProofSizeExt, recorder::Recorder};
 use sp_wasm_interface::HostFunctions;
 use std::{
@@ -567,11 +568,6 @@ impl PalletCmd {
 	}
 
 	/// Produce a genesis storage and genesis changes.
-	///
-	/// It would be easier to only return one type, but there is no easy way to convert them.
-	// TODO: Re-write `BenchmarkingState` to not be such a clusterfuck and only accept
-	// `OverlayedChanges` instead of a mix between `OverlayedChanges` and `State`. But this can only
-	// be done once we deprecated and removed the legacy interface :(
 	fn genesis_storage<H: Hash, F: HostFunctions>(
 		&self,
 		chain_spec: &Option<Box<dyn ChainSpec>>,
@@ -584,37 +580,35 @@ impl PalletCmd {
 					return Err("No chain spec specified to generate the genesis state".into());
 				};
 
-				let storage = chain_spec
+				chain_spec
 					.build_storage()
-					.map_err(|e| format!("{ERROR_CANNOT_BUILD_GENESIS}\nError: {e}"))?;
-
-				storage
+					.map_err(|e| format!("{ERROR_CANNOT_BUILD_GENESIS}\nError: {e}"))?
 			},
 			(Some(GenesisBuilder::Runtime), _) | (None, true) =>
-				self.genesis_from_runtime::<H, F>()?,
+				self.genesis_from_runtime::<H, F>(chain_spec)?,
 		})
 	}
 
 	/// Generate the genesis changeset by the runtime API.
-	fn genesis_from_runtime<H: Hash, F: HostFunctions>(&self) -> Result<sp_storage::Storage> {
+	fn genesis_from_runtime<H: Hash, F: HostFunctions>(
+		&self,
+		chain_spec: &Option<Box<dyn ChainSpec>>,
+	) -> Result<sp_storage::Storage> {
+		let storage = chain_spec
+			.as_ref()
+			.map(|spec| {
+				spec.build_storage()
+					.map_err(|e| format!("{ERROR_CANNOT_BUILD_GENESIS}\nError: {e}"))
+			})
+			.transpose()?
+			.unwrap_or_default();
+
 		let state = BenchmarkingState::<H>::new(
-			Default::default(),
+			storage,
 			Some(self.database_cache_size as usize),
 			false,
 			false,
 		)?;
-
-		// Create a dummy WasmExecutor just to build the genesis storage.
-		let method =
-			execution_method_from_cli(self.wasm_method, self.wasmtime_instantiation_strategy);
-		let executor = WasmExecutor::<(
-			sp_io::SubstrateHostFunctions,
-			frame_benchmarking::benchmarking::HostFunctions,
-			F,
-		)>::builder()
-		.with_execution_method(method)
-		.with_allow_missing_host_functions(self.allow_missing_host_functions)
-		.build();
 
 		let runtime = self.runtime_blob(&state)?;
 		let runtime_code = runtime.code()?;
@@ -623,12 +617,14 @@ impl PalletCmd {
 			.fetch_runtime_code()
 			.ok_or("Unable to fetch code bytes")?;
 
-		let genesis_config_caller = GenesisConfigBuilderRuntimeCaller::<F>::new_with_executor(
-			code_bytes.as_ref(),
-			executor,
-		);
-
-		Ok(genesis_config_caller.get_storage_for_named_preset(Some(GENESIS_PRESET.into()))?)
+		let genesis_config_caller = GenesisConfigBuilderRuntimeCaller::<(
+			frame_benchmarking::benchmarking::HostFunctions,
+			F,
+		)>::new(code_bytes.as_ref());
+		let preset = GENESIS_PRESET.to_string();
+		let mut storage = genesis_config_caller.get_storage_for_named_preset(Some(&preset))?;
+		storage.top.insert(CODE.into(), code_bytes.to_vec());
+		Ok(storage)
 	}
 
 	/// Execute a state machine and decode its return value as `R`.

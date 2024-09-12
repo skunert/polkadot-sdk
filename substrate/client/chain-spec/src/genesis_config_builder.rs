@@ -63,10 +63,6 @@ where
 		let executor = WasmExecutor::<(sp_io::SubstrateHostFunctions, EHF)>::builder()
 			.with_allow_missing_host_functions(true)
 			.build();
-		Self::new_with_executor(code, executor)
-	}
-
-	pub fn new_with_executor<F: HostFunctions>(code: &'a [u8], executor: WasmExecutor<F>) -> Self {
 		GenesisConfigBuilderRuntimeCaller {
 			code: code.into(),
 			code_hash: sp_crypto_hashing::blake2_256(code).to_vec(),
