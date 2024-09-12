@@ -27,7 +27,7 @@ use frame_benchmarking::{
 };
 use frame_support::traits::StorageInfo;
 use linked_hash_map::LinkedHashMap;
-use sc_chain_spec::json_patch::merge as json_merge;
+use sc_chain_spec::{json_patch::merge as json_merge, GenesisConfigBuilderRuntimeCaller};
 use sc_cli::{execution_method_from_cli, ChainSpec, CliConfiguration, Result, SharedParams};
 use sc_client_db::BenchmarkingState;
 use sc_executor::{HeapAllocStrategy, WasmExecutor, DEFAULT_HEAP_ALLOC_STRATEGY};
@@ -214,9 +214,7 @@ impl PalletCmd {
 			return self.output_from_results(&batches)
 		}
 
-		let (genesis_storage, genesis_changes) =
-			self.genesis_storage::<Hasher, ExtraHostFunctions>(&chain_spec)?;
-		let mut changes = genesis_changes.clone();
+		let genesis_storage = self.genesis_storage::<Hasher, ExtraHostFunctions>(&chain_spec)?;
 
 		let cache_size = Some(self.database_cache_size as usize);
 		let state_with_tracking = BenchmarkingState::<Hasher>::new(
@@ -258,6 +256,7 @@ impl PalletCmd {
 		.with_runtime_cache_size(2)
 		.build();
 
+		let mut changes = Default::default();
 		let (list, storage_info): (Vec<BenchmarkList>, Vec<StorageInfo>) =
 			Self::exec_state_machine(
 				StateMachine::new(
@@ -347,7 +346,7 @@ impl PalletCmd {
 			for (s, selected_components) in all_components.iter().enumerate() {
 				// First we run a verification
 				if !self.no_verify {
-					let mut changes = genesis_changes.clone();
+					let mut changes = Default::default();
 					let state = &state_without_tracking;
 					// Don't use these results since verification code will add overhead.
 					let _batch: Vec<BenchmarkBatch> = match Self::exec_state_machine::<
@@ -389,7 +388,7 @@ impl PalletCmd {
 				}
 				// Do one loop of DB tracking.
 				{
-					let mut changes = genesis_changes.clone();
+					let mut changes = Default::default();
 					let state = &state_with_tracking;
 					let batch: Vec<BenchmarkBatch> = match Self::exec_state_machine::<
 						std::result::Result<Vec<BenchmarkBatch>, String>,
@@ -432,7 +431,7 @@ impl PalletCmd {
 				}
 				// Finally run a bunch of loops to get extrinsic timing information.
 				for r in 0..self.external_repeat {
-					let mut changes = genesis_changes.clone();
+					let mut changes = Default::default();
 					let state = &state_without_tracking;
 					let batch = match Self::exec_state_machine::<
 						std::result::Result<Vec<BenchmarkBatch>, String>,
@@ -576,7 +575,7 @@ impl PalletCmd {
 	fn genesis_storage<H: Hash, F: HostFunctions>(
 		&self,
 		chain_spec: &Option<Box<dyn ChainSpec>>,
-	) -> Result<(sp_storage::Storage, OverlayedChanges<H>)> {
+	) -> Result<sp_storage::Storage> {
 		Ok(match (self.genesis_builder, self.runtime.is_some()) {
 			(Some(GenesisBuilder::None), _) => Default::default(),
 			(Some(GenesisBuilder::Spec), _) | (None, false) => {
@@ -589,15 +588,15 @@ impl PalletCmd {
 					.build_storage()
 					.map_err(|e| format!("{ERROR_CANNOT_BUILD_GENESIS}\nError: {e}"))?;
 
-				(storage, Default::default())
+				storage
 			},
 			(Some(GenesisBuilder::Runtime), _) | (None, true) =>
-				(Default::default(), self.genesis_from_runtime::<H, F>()?),
+				self.genesis_from_runtime::<H, F>()?,
 		})
 	}
 
 	/// Generate the genesis changeset by the runtime API.
-	fn genesis_from_runtime<H: Hash, F: HostFunctions>(&self) -> Result<OverlayedChanges<H>> {
+	fn genesis_from_runtime<H: Hash, F: HostFunctions>(&self) -> Result<sp_storage::Storage> {
 		let state = BenchmarkingState::<H>::new(
 			Default::default(),
 			Some(self.database_cache_size as usize),
@@ -619,81 +618,17 @@ impl PalletCmd {
 
 		let runtime = self.runtime_blob(&state)?;
 		let runtime_code = runtime.code()?;
+		let code_bytes = runtime_code
+			.code_fetcher
+			.fetch_runtime_code()
+			.ok_or("Unable to fetch code bytes")?;
 
-		// We cannot use the `GenesisConfigBuilderRuntimeCaller` here since it returns the changes
-		// as `Storage` item, but we need it as `OverlayedChanges`.
-		let genesis_json: Option<Vec<u8>> = Self::exec_state_machine(
-			StateMachine::new(
-				&state,
-				&mut Default::default(),
-				&executor,
-				"GenesisBuilder_get_preset",
-				&None::<PresetId>.encode(), // Use the default preset
-				&mut Self::build_extensions(executor.clone(), state.recorder()),
-				&runtime_code,
-				CallContext::Offchain,
-			),
-			"build the genesis spec",
-		)?;
+		let genesis_config_caller = GenesisConfigBuilderRuntimeCaller::<F>::new_with_executor(
+			code_bytes.as_ref(),
+			executor,
+		);
 
-		let Some(base_genesis_json) = genesis_json else {
-			return Err("GenesisBuilder::get_preset returned no data".into())
-		};
-
-		let base_genesis_json = serde_json::from_slice::<serde_json::Value>(&base_genesis_json)
-			.map_err(|e| format!("GenesisBuilder::get_preset returned invalid JSON: {:?}", e))?;
-
-		let dev_genesis_json: Option<Vec<u8>> = Self::exec_state_machine(
-			StateMachine::new(
-				&state,
-				&mut Default::default(),
-				&executor,
-				"GenesisBuilder_get_preset",
-				&Some::<PresetId>(GENESIS_PRESET.into()).encode(), // Use the default preset
-				&mut Self::build_extensions(executor.clone(), state.recorder()),
-				&runtime_code,
-				CallContext::Offchain,
-			),
-			"build the genesis spec",
-		)?;
-
-		let mut genesis_json = serde_json::Value::default();
-		json_merge(&mut genesis_json, base_genesis_json);
-
-		if let Some(dev) = dev_genesis_json {
-			let dev: serde_json::Value = serde_json::from_slice(&dev).map_err(|e| {
-				format!("GenesisBuilder::get_preset returned invalid JSON: {:?}", e)
-			})?;
-			json_merge(&mut genesis_json, dev);
-		} else {
-			log::warn!(
-				"Could not find genesis preset '{GENESIS_PRESET}'. Falling back to default."
-			);
-		}
-
-		let json_pretty_str = serde_json::to_string_pretty(&genesis_json)
-			.map_err(|e| format!("json to string failed: {e}"))?;
-
-		let mut changes = Default::default();
-		let build_res: GenesisBuildResult = Self::exec_state_machine(
-			StateMachine::new(
-				&state,
-				&mut changes,
-				&executor,
-				"GenesisBuilder_build_state",
-				&json_pretty_str.encode(),
-				&mut Extensions::default(),
-				&runtime_code,
-				CallContext::Offchain,
-			),
-			"populate the genesis state",
-		)?;
-
-		if let Err(e) = build_res {
-			return Err(format!("GenesisBuilder::build_state failed: {}", e).into())
-		}
-
-		Ok(changes)
+		Ok(genesis_config_caller.get_storage_for_named_preset(Some(GENESIS_PRESET.into()))?)
 	}
 
 	/// Execute a state machine and decode its return value as `R`.
