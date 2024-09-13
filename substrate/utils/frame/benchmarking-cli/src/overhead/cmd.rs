@@ -56,6 +56,7 @@ use subxt::{
 	utils::MultiAddress,
 	Config, OfflineClient,
 };
+use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
 
 /// Benchmark the execution overhead per-block and per-extrinsic.
 #[derive(Debug, Parser)]
@@ -184,7 +185,7 @@ impl OverheadCmd {
 			)
 			.expect("Can build");
 
-		let client: Arc<ParachainClient<fake_runtime_api::aura::RuntimeApi>> = Arc::new(client);
+		let client: Arc<OverheadClient> = Arc::new(client);
 		let ext_builder: Box<dyn ExtrinsicBuilder> = match (ext_builder, &self.params.address_type)
 		{
 			(Some(ext_builder), _) => ext_builder,
@@ -284,8 +285,8 @@ pub type HostFunctions = (
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 	sp_io::SubstrateHostFunctions,
 );
-pub type ParachainClient<RuntimeApi> =
-	TFullClient<opaque::Block, RuntimeApi, WasmExecutor<HostFunctions>>;
+pub type OverheadClient =
+	TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum AddressAccountIdConfig {}

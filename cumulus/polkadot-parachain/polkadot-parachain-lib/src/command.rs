@@ -35,7 +35,7 @@ use crate::{
 #[cfg(feature = "runtime-benchmarks")]
 use cumulus_client_service::storage_proof_size::HostFunctions as ReclaimHostFunctions;
 use cumulus_primitives_core::ParaId;
-use frame_benchmarking_cli::{BenchmarkCmd, SUBSTRATE_REFERENCE_HARDWARE};
+use frame_benchmarking_cli::{BenchmarkCmd, ExtrinsicBuilder, SUBSTRATE_REFERENCE_HARDWARE};
 use log::info;
 use parachains_common::{AssetHubPolkadotAuraId, AuraId};
 use sc_cli::{Result, SubstrateCli};
@@ -48,6 +48,17 @@ use sp_runtime::traits::HashingFor;
 pub struct RunConfig {
 	pub chain_spec_loader: Box<dyn LoadSpec>,
 	pub runtime_resolver: Box<dyn RuntimeResolver>,
+	pub extrinsic_builder: Option<Box<dyn ExtrinsicBuilder>>,
+}
+
+impl RunConfig {
+	pub fn new(chain_spec_loader: Box<dyn RuntimeResolver>, runtime_resolver: Box<dyn LoadSpec>) -> Self {
+		RunConfig {
+			chain_spec_loader,
+			runtime_resolver,
+			extrinsic_builder: None,
+		}
+	}
 }
 
 fn new_node_spec(
@@ -186,7 +197,7 @@ pub fn run<CliConfig: crate::cli::CliConfig>(cmd_config: RunConfig) -> Result<()
 						&cmd_config.runtime_resolver,
 						&cli.node_extra_args(),
 					)?;
-					node.run_benchmark_overhead_cmd(config, cmd)
+					node.run_benchmark_overhead_cmd(config, cmd, cmd_config.extrinsic_builder)
 				}),
 				#[allow(unreachable_patterns)]
 				_ => Err("Benchmarking sub-command unsupported or compilation feature missing. \

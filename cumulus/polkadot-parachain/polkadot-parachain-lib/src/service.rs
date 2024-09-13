@@ -939,6 +939,7 @@ pub(crate) trait DynNodeSpec {
 		self: Box<Self>,
 		config: Configuration,
 		cmd: &OverheadCmd,
+		ext_builder: Option<Box<dyn ExtrinsicBuilder>>
 	) -> SyncCmdResult;
 
 	fn start_node(
@@ -1035,32 +1036,9 @@ where
 		self: Box<Self>,
 		config: Configuration,
 		cmd: &OverheadCmd,
+		ext_builder: Option<Box<dyn ExtrinsicBuilder>>
 	) -> SyncCmdResult {
-		let partial = Self::new_partial(&config).map_err(sc_cli::Error::Service)?;
-		let client = partial.client.clone();
-		let duration = std::time::Duration::from_millis(0);
-
-		let genesis = client.usage_info().chain.best_hash;
-		let header = client.header(genesis).unwrap().unwrap();
-		let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
-		relay_state.included_para_head = Some(header.encode().into());
-		relay_state.para_id = ParaId::from(cmd.params.bench.para_id);
-		let mut vfp = PersistedValidationData::default();
-		let (root, proof) = relay_state.into_state_root_and_proof();
-		vfp.relay_parent_storage_root = root;
-		let para_data = ParachainInherentData {
-			validation_data: vfp,
-			relay_chain_state: proof,
-			downward_messages: Default::default(),
-			horizontal_messages: Default::default(),
-		};
-
-		let mut inherent_data = sp_inherents::InherentData::new();
-		let timestamp = sp_timestamp::InherentDataProvider::new(duration.into());
-		let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
-		let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
-		let remark_builder = DynamicRemarkBuilder { client: client.clone() };
-		cmd.run(config, client, inherent_data, Vec::new(), &remark_builder)
+		cmd.run_with_spec(config, None)
 	}
 
 	fn start_node(

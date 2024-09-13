@@ -14,17 +14,17 @@
 // You should have received a copy of the GNU General Public License
 // along with Cumulus.  If not, see <http://www.gnu.org/licenses/>.
 
-//! These are used to provide a type that implements these runtime APIs without requiring to import
-//! the native runtimes.
+//! A fake runtime struct that allows us to instantiate a client.
+//! Has all the required runtime APIs implemented to satisfy trait bounds,
+//! but the methods are never called since we use WASM exclusively.
 
-use super::super::cmd::opaque::Block;
+use super::cmd::opaque::Block;
 use sp_core::OpaqueMetadata;
 use sp_runtime::{
 	traits::Block as BlockT,
 	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult,
 };
-
 #[allow(unused)]
 pub struct Runtime;
 
