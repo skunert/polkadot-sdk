@@ -25,7 +25,7 @@ use frame_benchmarking::{
 	Analysis, BenchmarkBatch, BenchmarkBatchSplitResults, BenchmarkList, BenchmarkParameter,
 	BenchmarkResult, BenchmarkSelector,
 };
-use frame_support::traits::StorageInfo;
+use frame_support::traits::{Len, StorageInfo};
 use linked_hash_map::LinkedHashMap;
 use sc_chain_spec::{json_patch::merge as json_merge, GenesisConfigBuilderRuntimeCaller};
 use sc_cli::{execution_method_from_cli, ChainSpec, CliConfiguration, Result, SharedParams};
@@ -602,6 +602,8 @@ impl PalletCmd {
 			})
 			.transpose()?
 			.unwrap_or_default();
+		let code = storage.top.get(CODE).expect("Unexpected missing code");
+		log::info!("Works: {}", code.len());
 
 		let state = BenchmarkingState::<H>::new(
 			storage,
@@ -616,6 +618,7 @@ impl PalletCmd {
 			.code_fetcher
 			.fetch_runtime_code()
 			.ok_or("Unable to fetch code bytes")?;
+		log::info!("Works 2: {}", code_bytes.len());
 
 		let genesis_config_caller = GenesisConfigBuilderRuntimeCaller::<(
 			frame_benchmarking::benchmarking::HostFunctions,

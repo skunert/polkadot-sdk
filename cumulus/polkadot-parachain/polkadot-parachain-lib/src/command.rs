@@ -52,12 +52,11 @@ pub struct RunConfig {
 }
 
 impl RunConfig {
-	pub fn new(chain_spec_loader: Box<dyn RuntimeResolver>, runtime_resolver: Box<dyn LoadSpec>) -> Self {
-		RunConfig {
-			chain_spec_loader,
-			runtime_resolver,
-			extrinsic_builder: None,
-		}
+	pub fn new(
+		runtime_resolver: Box<dyn RuntimeResolver>,
+		chain_spec_loader: Box<dyn LoadSpec>,
+	) -> Self {
+		RunConfig { chain_spec_loader, runtime_resolver, extrinsic_builder: None }
 	}
 }
 

@@ -28,23 +28,27 @@ use crate::{
 };
 use clap::{Args, Parser};
 use codec::{Decode, Encode};
+use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
 use frame_support::__private::sp_tracing::tracing;
 use log::info;
 use polkadot_parachain_primitives::primitives::Id as ParaId;
 use polkadot_primitives::v7::PersistedValidationData;
 use sc_block_builder::BlockBuilderApi;
-use sc_chain_spec::GenesisBlockBuilder;
+use sc_chain_spec::{ChainSpec, GenesisBlockBuilder, GenesisConfigBuilderRuntimeCaller};
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
-use sc_client_api::UsageProvider;
+use sc_client_api::{Backend, UsageProvider};
 use sc_executor::WasmExecutor;
-use sc_service::{new_db_backend, new_full_parts_with_genesis_builder, Configuration, TFullClient};
+use sc_service::{
+	new_db_backend, new_full_parts_with_genesis_builder, Configuration, TFullBackend, TFullClient,
+};
 use serde::Serialize;
 use sp_api::{ApiExt, CallApiAt, Core, Metadata, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::{crypto::AccountId32, Pair, H256};
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{traits::Block as BlockT, DigestItem, MultiSignature, OpaqueExtrinsic};
-use std::{fmt::Debug, path::PathBuf, sync::Arc};
+use sp_storage::well_known_keys::CODE;
+use std::{fmt::Debug, fs, path::PathBuf, sync::Arc};
 use subxt::{
 	client::RuntimeVersion,
 	config::{
@@ -56,7 +60,6 @@ use subxt::{
 	utils::MultiAddress,
 	Config, OfflineClient,
 };
-use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
 
 /// Benchmark the execution overhead per-block and per-extrinsic.
 #[derive(Debug, Parser)]
@@ -159,6 +162,63 @@ fn create_parachain_inherent_data<
 }
 
 impl OverheadCmd {
+	fn build_genesis_block_builder(
+		&self,
+		chain_spec: &Box<dyn ChainSpec>,
+		backend: Arc<TFullBackend<opaque::Block>>,
+		executor: WasmExecutor<HostFunctions>,
+	) -> Result<
+		GenesisBlockBuilder<
+			opaque::Block,
+			TFullBackend<opaque::Block>,
+			WasmExecutor<HostFunctions>,
+		>,
+	> {
+		match self.params.genesis_builder {
+			None => {
+				todo!()
+			},
+			Some(GenesisBuilder::None) => {
+				todo!()
+			},
+			Some(GenesisBuilder::Runtime) => {
+				// TODO In fact should be supported for chain specs
+				if self.params.runtime.is_none() {
+					return Err("Runtime path is required for `GenesisBuilder::Runtime`".into());
+				}
+				let runtime_file = fs::read(self.params.runtime.as_ref().unwrap())
+					.map_err(|e| format!("Unable to read runtime file: {:?}", e))?;
+
+				let genesis_config_caller =
+					GenesisConfigBuilderRuntimeCaller::<(HostFunctions)>::new(
+						runtime_file.as_ref(),
+					);
+				let preset = "development".to_string();
+				let mut storage =
+					genesis_config_caller.get_storage_for_named_preset(Some(&preset))?;
+				storage.top.insert(CODE.into(), runtime_file.to_vec());
+
+				log::info!("Using runtime to initialize genesis storage.");
+				GenesisBlockBuilder::new_with_storage(
+					storage,
+					true,
+					backend.clone(),
+					executor.clone(),
+				)
+				.map_err(|e| format!("Unable to build genesis block builder: {:?}", e).into())
+			},
+			// TODO See if we can clean this up. Maybe remove config and use the chain spec
+			// directly.
+			Some(GenesisBuilder::Spec) => GenesisBlockBuilder::new(
+				chain_spec.as_storage_builder(),
+				true,
+				backend.clone(),
+				executor.clone(),
+			)
+			.map_err(|e| format!("Unable to build genesis block builder: {:?}", e).into()),
+		}
+	}
+
 	pub fn run_with_spec(
 		&self,
 		config: Configuration,
@@ -167,12 +227,13 @@ impl OverheadCmd {
 		let executor = WasmExecutor::<HostFunctions>::builder().build();
 
 		let backend = new_db_backend(config.db_config())?;
-		let genesis_block_builder = GenesisBlockBuilder::new(
-			config.chain_spec.as_storage_builder(),
-			!config.no_genesis(),
-			backend.clone(),
-			executor.clone(),
-		)?;
+
+		let Ok(genesis_block_builder) =
+			self.build_genesis_block_builder(&config.chain_spec, backend.clone(), executor.clone())
+		else {
+			return Err("Unable to build genesis block builder".into());
+		};
+
 		let (client, _backend, _keystore_container, _task_manager) =
 			new_full_parts_with_genesis_builder(
 				&config,
@@ -285,8 +346,7 @@ pub type HostFunctions = (
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 	sp_io::SubstrateHostFunctions,
 );
-pub type OverheadClient =
-	TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
+pub type OverheadClient = TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum AddressAccountIdConfig {}

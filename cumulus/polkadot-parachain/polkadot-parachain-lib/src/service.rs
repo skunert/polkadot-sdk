@@ -939,7 +939,7 @@ pub(crate) trait DynNodeSpec {
 		self: Box<Self>,
 		config: Configuration,
 		cmd: &OverheadCmd,
-		ext_builder: Option<Box<dyn ExtrinsicBuilder>>
+		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> SyncCmdResult;
 
 	fn start_node(
@@ -1036,9 +1036,9 @@ where
 		self: Box<Self>,
 		config: Configuration,
 		cmd: &OverheadCmd,
-		ext_builder: Option<Box<dyn ExtrinsicBuilder>>
+		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> SyncCmdResult {
-		cmd.run_with_spec(config, None)
+		cmd.run_with_spec(config, ext_builder)
 	}
 
 	fn start_node(
