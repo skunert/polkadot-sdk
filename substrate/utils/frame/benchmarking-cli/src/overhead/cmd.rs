@@ -49,6 +49,7 @@ use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{traits::Block as BlockT, DigestItem, MultiSignature, OpaqueExtrinsic};
 use sp_storage::well_known_keys::CODE;
 use std::{fmt::Debug, fs, path::PathBuf, sync::Arc};
+use serde_json::{json, Value};
 use subxt::{
 	client::RuntimeVersion,
 	config::{
@@ -186,19 +187,32 @@ impl OverheadCmd {
 				if self.params.runtime.is_none() {
 					return Err("Runtime path is required for `GenesisBuilder::Runtime`".into());
 				}
-				let runtime_file = fs::read(self.params.runtime.as_ref().unwrap())
+				let code_bytes = fs::read(self.params.runtime.as_ref().unwrap())
 					.map_err(|e| format!("Unable to read runtime file: {:?}", e))?;
 
 				let genesis_config_caller =
 					GenesisConfigBuilderRuntimeCaller::<(HostFunctions)>::new(
-						runtime_file.as_ref(),
+						code_bytes.as_ref(),
 					);
 				let preset = "development".to_string();
+				let mut res = genesis_config_caller.get_named_preset(Some(&preset)).map_err(|e| format!("Unable to build genesis block builder: {:?}", e))?;
+				dbg!(&res);
+				let parachain_id_from_preset = res.get("parachainInfo")
+					.and_then(|info| info.get("parachainId"))
+					.and_then(|id| id.as_u64());
+				dbg!(parachain_id_from_preset);
+					if let Some(parachain_info) = res.get_mut("parachainInfo") {
+						if let Some(parachain_id) = parachain_info.get_mut("parachainId") {
+							log::info!("Setting parachain id");
+							*parachain_id = json!(100);
+						}
+					}
 				let mut storage =
-					genesis_config_caller.get_storage_for_named_preset(Some(&preset))?;
-				storage.top.insert(CODE.into(), runtime_file.to_vec());
+					genesis_config_caller.get_storage_for_patch(res.clone())?;
+				storage.top.insert(CODE.into(), code_bytes.to_vec());
 
 				log::info!("Using runtime to initialize genesis storage.");
+				dbg!(&res);
 				GenesisBlockBuilder::new_with_storage(
 					storage,
 					true,
@@ -258,7 +272,7 @@ impl OverheadCmd {
 
 		let digest_items = Default::default();
 
-		let inherent_data = create_parachain_inherent_data(&*client, self.params.bench.para_id);
+		let inherent_data = create_parachain_inherent_data(&*client, dbg!(self.params.bench.para_id));
 
 		self.run(config, client, inherent_data, digest_items, &*ext_builder)
 	}
