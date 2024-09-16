@@ -48,10 +48,12 @@ pub struct RunConfig {
 	pub chain_spec_loader: Box<dyn LoadSpec>,
 	/// A custom runtime resolver.
 	pub runtime_resolver: Box<dyn RuntimeResolver>,
+	/// Extrinsic builder to use in benchmarks.
 	pub extrinsic_builder: Option<Box<dyn ExtrinsicBuilder>>,
 }
 
 impl RunConfig {
+	/// Create a new `RunConfig`
 	pub fn new(
 		runtime_resolver: Box<dyn RuntimeResolver>,
 		chain_spec_loader: Box<dyn LoadSpec>,
