@@ -150,12 +150,8 @@ where
 	///
 	/// Please note that the patch may contain full `RuntimeGenesisConfig`.
 	pub fn get_storage_for_patch(&self, patch: Value) -> core::result::Result<Storage, String> {
-		println!("Hello World");
 		let mut config = self.get_default_config()?;
-		dbg!(&config);
 		crate::json_patch::merge(&mut config, patch);
-		dbg!("patched");
-		dbg!(&config);
 		self.get_storage_for_config(config)
 	}
 

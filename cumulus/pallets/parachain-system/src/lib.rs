@@ -523,6 +523,7 @@ pub mod pallet {
 				"ValidationData must be updated only once in a block",
 			);
 
+			panic!("no!");
 			// TODO: This is more than zero, but will need benchmarking to figure out what.
 			let mut total_weight = Weight::zero();
 
@@ -1200,6 +1201,7 @@ impl<T: Config> Pallet<T> {
 		capacity: consensus_hook::UnincludedSegmentCapacity,
 	) -> Weight {
 		let mut weight_used = Weight::zero();
+		panic!("Wow");
 		// If the unincluded segment length is nonzero, then the parachain head must be present.
 		let para_head =
 			relay_state_proof.read_included_para_head().ok().map(|h| T::Hashing::hash(&h.0));
