@@ -34,16 +34,19 @@ use log::info;
 use polkadot_parachain_primitives::primitives::Id as ParaId;
 use polkadot_primitives::v8::PersistedValidationData;
 use sc_block_builder::BlockBuilderApi;
-use sc_chain_spec::{ChainSpec, GenesisBlockBuilder, GenesisConfigBuilderRuntimeCaller};
+use sc_chain_spec::{
+	ChainSpec, GenericChainSpec, GenesisBlockBuilder, GenesisConfigBuilderRuntimeCaller,
+	NoExtension,
+};
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
-use sc_client_api::{Backend, UsageProvider};
+use sc_client_api::{execution_extensions::ExecutionExtensions, UsageProvider};
+use sc_client_db::{BlocksPruning, DatabaseSettings, DatabaseSource};
 use sc_executor::WasmExecutor;
 use sc_service::{
-	new_db_backend, new_full_parts_with_genesis_builder, BasePath, Configuration, TFullBackend,
-	TFullClient,
+	new_client, new_db_backend, BasePath, ClientConfig, TFullBackend, TFullClient, TaskManager,
 };
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use sp_api::{ApiExt, CallApiAt, Core, Metadata, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::{crypto::AccountId32, Pair, H256};
@@ -62,6 +65,8 @@ use subxt::{
 	utils::MultiAddress,
 	Config, OfflineClient,
 };
+
+const DEFAULT_PARA_ID: u32 = 100;
 
 /// Benchmark the execution overhead per-block and per-extrinsic.
 #[derive(Debug, Parser)]
@@ -166,7 +171,7 @@ fn create_parachain_inherent_data<
 impl OverheadCmd {
 	fn build_genesis_block_builder(
 		&self,
-		chain_spec: &Box<dyn ChainSpec>,
+		chain_spec: Option<&Box<dyn ChainSpec>>,
 		backend: Arc<TFullBackend<opaque::Block>>,
 		executor: WasmExecutor<HostFunctions>,
 		para_id: ParaId,
@@ -193,19 +198,14 @@ impl OverheadCmd {
 					.map_err(|e| format!("Unable to read runtime file: {:?}", e))?;
 
 				let genesis_config_caller =
-					GenesisConfigBuilderRuntimeCaller::<(HostFunctions)>::new(code_bytes.as_ref());
+					GenesisConfigBuilderRuntimeCaller::<HostFunctions>::new(code_bytes.as_ref());
 				let preset = "development".to_string();
 				let mut res = genesis_config_caller
 					.get_named_preset(Some(&preset))
 					.map_err(|e| format!("Unable to build genesis block builder: {:?}", e))?;
-				let parachain_id_from_preset = res
-					.get("parachainInfo")
-					.and_then(|info| info.get("parachainId"))
-					.and_then(|id| id.as_u64());
-				dbg!(parachain_id_from_preset);
+				log::info!("Setting parachain id in genesis to {}", para_id);
 				if let Some(parachain_info) = res.get_mut("parachainInfo") {
 					if let Some(parachain_id) = parachain_info.get_mut("parachainId") {
-						log::info!("Setting parachain id");
 						*parachain_id = json!(para_id);
 					}
 				}
@@ -223,29 +223,48 @@ impl OverheadCmd {
 			},
 			// TODO See if we can clean this up. Maybe remove config and use the chain spec
 			// directly.
-			Some(GenesisBuilder::Spec) => GenesisBlockBuilder::new(
-				chain_spec.as_storage_builder(),
+			Some(GenesisBuilder::Spec) if chain_spec.is_some() => GenesisBlockBuilder::new(
+				chain_spec.unwrap().as_storage_builder(),
 				true,
 				backend.clone(),
 				executor.clone(),
 			)
 			.map_err(|e| format!("Unable to build genesis block builder: {:?}", e).into()),
+			Some(GenesisBuilder::Spec) =>
+				Err("To use spec genesis builder, provide a chain spec.".into()),
 		}
 	}
 
 	pub fn run_with_spec(
 		&self,
-		mut config: Configuration,
+		chain_spec: Option<Box<dyn ChainSpec>>,
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> Result<()> {
-		let para_id = self.params.bench.para_id.unwrap_or(100);
-		let executor = WasmExecutor::<HostFunctions>::builder().build();
+		let runtime = sc_cli::build_runtime().expect("Can build tokio runtime");
+		let para_id = self.params.bench.para_id.unwrap_or(DEFAULT_PARA_ID);
+		let executor = WasmExecutor::<HostFunctions>::builder()
+			.with_allow_missing_host_functions(true)
+			.build();
 
-		let backend = new_db_backend(config.db_config())?;
+		let base_path = BasePath::new_temp_dir()?;
+		let backend = new_db_backend(DatabaseSettings {
+			trie_cache_maximum_size: Some(1024),
+			state_pruning: None,
+			blocks_pruning: BlocksPruning::KeepAll,
+			source: DatabaseSource::RocksDb { cache_size: 1024, path: base_path.path().into() },
+		})?;
 
-		log::info!("{:?}", config.base_path);
+		let chain_spec = match (chain_spec, self.shared_params.chain.clone()) {
+			(Some(chain_spec), _) => Some(chain_spec),
+			(None, Some(path)) => Some(Box::new(
+				GenericChainSpec::<NoExtension, HostFunctions>::from_json_file(path.into())
+					.map_err(|e| format!("Unable to load chain spec: {:?}", e))?,
+			) as Box<_>),
+			(_, _) => None,
+		};
+
 		let Ok(genesis_block_builder) = self.build_genesis_block_builder(
-			&config.chain_spec,
+			chain_spec.as_ref(),
 			backend.clone(),
 			executor.clone(),
 			ParaId::from(para_id),
@@ -253,19 +272,34 @@ impl OverheadCmd {
 			return Err("Unable to build genesis block builder".into());
 		};
 
-		let (client, _backend, _keystore_container, _task_manager) =
-			new_full_parts_with_genesis_builder(
-				&config,
-				None,
-				executor,
-				backend,
-				genesis_block_builder,
-				// TODO: Change this depending on parachain or not
-				true,
-			)
-			.expect("Can build");
+		let Ok(task_manager) = TaskManager::new(runtime.handle().clone(), None) else {
+			return Err("Unable to build task manager".into());
+		};
 
-		let client: Arc<OverheadClient> = Arc::new(client);
+		let extensions = ExecutionExtensions::new(None, Arc::new(executor.clone()));
+		let client: Arc<OverheadClient> = Arc::new(
+			new_client(
+				backend.clone(),
+				executor.clone(),
+				genesis_block_builder,
+				Default::default(),
+				Default::default(),
+				extensions,
+				Box::new(task_manager.spawn_handle()),
+				None,
+				None,
+				ClientConfig {
+					offchain_worker_enabled: false,
+					offchain_indexing_api: false,
+					wasm_runtime_overrides: None,
+					no_genesis: false,
+					wasm_runtime_substitutes: Default::default(),
+					enable_import_proof_recording: true,
+				},
+			)
+			.expect("Can build client"),
+		);
+
 		let ext_builder: Box<dyn ExtrinsicBuilder> = match (ext_builder, &self.params.address_type)
 		{
 			(Some(ext_builder), _) => ext_builder,
@@ -279,7 +313,7 @@ impl OverheadCmd {
 
 		let inherent_data = create_parachain_inherent_data(&*client, para_id);
 
-		self.run(config, client, inherent_data, digest_items, &*ext_builder)
+		self.run("some_name".to_string(), client, inherent_data, digest_items, &*ext_builder)
 	}
 	/// Measure the per-block and per-extrinsic execution overhead.
 	///
@@ -287,7 +321,7 @@ impl OverheadCmd {
 	/// `weights.hbs` template, one for each benchmark.
 	pub fn run<Block, C>(
 		&self,
-		cfg: Configuration,
+		chain_name: String,
 		client: Arc<C>,
 		inherent_data: sp_inherents::InherentData,
 		digest_items: Vec<DigestItem>,
@@ -310,8 +344,13 @@ impl OverheadCmd {
 		{
 			let (stats, proof_size) = bench.bench_block()?;
 			info!("Per-block execution overhead [ns]:\n{:?}", stats);
-			let template =
-				TemplateData::new(BenchmarkType::Block, &cfg, &self.params, &stats, proof_size)?;
+			let template = TemplateData::new(
+				BenchmarkType::Block,
+				&chain_name,
+				&self.params,
+				&stats,
+				proof_size,
+			)?;
 			template.write(&self.params.weight.weight_path)?;
 		}
 		// per-extrinsic execution overhead
@@ -320,7 +359,7 @@ impl OverheadCmd {
 			info!("Per-extrinsic execution overhead [ns]:\n{:?}", stats);
 			let template = TemplateData::new(
 				BenchmarkType::Extrinsic,
-				&cfg,
+				&chain_name,
 				&self.params,
 				&stats,
 				proof_size,

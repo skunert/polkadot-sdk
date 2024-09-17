@@ -19,7 +19,6 @@
 //! it into the `weights.hbs` template.
 
 use sc_cli::Result;
-use sc_service::Configuration;
 
 use handlebars::Handlebars;
 use log::info;
@@ -69,7 +68,7 @@ impl TemplateData {
 	/// Returns a new [`Self`] from the given params.
 	pub(crate) fn new(
 		t: BenchmarkType,
-		cfg: &Configuration,
+		chain_name: &String,
 		params: &OverheadParams,
 		stats: &Stats,
 		proof_size: u64,
@@ -85,7 +84,7 @@ impl TemplateData {
 		Ok(TemplateData {
 			short_name: t.short_name().into(),
 			long_name: t.long_name().into(),
-			runtime_name: cfg.chain_spec.name().into(),
+			runtime_name: chain_name.to_owned(),
 			version: VERSION.into(),
 			date: chrono::Utc::now().format("%Y-%m-%d (Y/M/D)").to_string(),
 			hostname: params.hostinfo.hostname(),

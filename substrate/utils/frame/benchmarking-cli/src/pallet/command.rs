@@ -25,9 +25,9 @@ use frame_benchmarking::{
 	Analysis, BenchmarkBatch, BenchmarkBatchSplitResults, BenchmarkList, BenchmarkParameter,
 	BenchmarkResult, BenchmarkSelector,
 };
-use frame_support::traits::{Len, StorageInfo};
+use frame_support::traits::StorageInfo;
 use linked_hash_map::LinkedHashMap;
-use sc_chain_spec::{json_patch::merge as json_merge, GenesisConfigBuilderRuntimeCaller};
+use sc_chain_spec::GenesisConfigBuilderRuntimeCaller;
 use sc_cli::{execution_method_from_cli, ChainSpec, CliConfiguration, Result, SharedParams};
 use sc_client_db::BenchmarkingState;
 use sc_executor::{HeapAllocStrategy, WasmExecutor, DEFAULT_HEAP_ALLOC_STRATEGY};
@@ -40,10 +40,9 @@ use sp_core::{
 	Hasher,
 };
 use sp_externalities::Extensions;
-use sp_genesis_builder::{PresetId, Result as GenesisBuildResult};
 use sp_keystore::{testing::MemoryKeystore, KeystoreExt};
 use sp_runtime::traits::Hash;
-use sp_state_machine::{OverlayedChanges, StateMachine};
+use sp_state_machine::StateMachine;
 use sp_storage::well_known_keys::CODE;
 use sp_trie::{proof_size_extension::ProofSizeExt, recorder::Recorder};
 use sp_wasm_interface::HostFunctions;

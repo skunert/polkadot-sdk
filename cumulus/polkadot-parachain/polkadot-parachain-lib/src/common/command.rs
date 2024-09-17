@@ -80,8 +80,8 @@ pub trait NodeCommandRunner {
 
 	fn run_benchmark_overhead_cmd(
 		self: Box<Self>,
-		config: Configuration,
 		cmd: &OverheadCmd,
+		chain_spec: Option<Box<dyn sc_service::ChainSpec>>,
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> SyncCmdResult;
 }
@@ -168,10 +168,10 @@ where
 
 	fn run_benchmark_overhead_cmd(
 		self: Box<Self>,
-		config: Configuration,
 		cmd: &OverheadCmd,
+		chain_spec: Option<Box<dyn sc_service::ChainSpec>>,
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> SyncCmdResult {
-		cmd.run_with_spec(config, ext_builder)
+		cmd.run_with_spec(chain_spec, ext_builder)
 	}
 }
