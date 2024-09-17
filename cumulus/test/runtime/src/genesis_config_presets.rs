@@ -17,7 +17,7 @@ fn cumulus_test_runtime(
 	let config = RuntimeGenesisConfig {
 		system: Default::default(),
 		balances: BalancesConfig {
-			balances: endowed_accounts.iter().cloned().map(|k| (k, 500 * 4096 * 4096)).collect(),
+			balances: endowed_accounts.iter().cloned().map(|k| (k, 1 << 60)).collect(),
 		},
 		sudo: SudoConfig { key: Some(get_account_id_from_seed::<sr25519::Public>("Alice")) },
 		transaction_payment: Default::default(),

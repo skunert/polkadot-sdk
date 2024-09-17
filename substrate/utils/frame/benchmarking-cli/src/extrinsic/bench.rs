@@ -62,7 +62,7 @@ pub struct BenchmarkParams {
 
 	/// Para Id to Benchmark
 	#[arg(long)]
-	pub para_id: u32,
+	pub para_id: Option<u32>,
 }
 
 /// The results of multiple runs in nano seconds.
