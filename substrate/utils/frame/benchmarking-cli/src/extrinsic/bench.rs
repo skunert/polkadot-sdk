@@ -74,6 +74,7 @@ pub(crate) struct Benchmark<Block, C> {
 	params: BenchmarkParams,
 	inherent_data: sp_inherents::InherentData,
 	digest_items: Vec<DigestItem>,
+	record_proof: bool,
 	_p: PhantomData<Block>,
 }
 
@@ -92,8 +93,9 @@ where
 		params: BenchmarkParams,
 		inherent_data: sp_inherents::InherentData,
 		digest_items: Vec<DigestItem>,
+		record_proof: bool,
 	) -> Self {
-		Self { client, params, inherent_data, digest_items, _p: PhantomData }
+		Self { client, params, inherent_data, digest_items, record_proof, _p: PhantomData }
 	}
 
 	/// Benchmark a block with only inherents.
@@ -195,11 +197,13 @@ where
 		info!("Running {} warmups...", self.params.warmup);
 		for _ in 0..self.params.warmup {
 			let mut runtime_api = self.client.runtime_api();
-			runtime_api.record_proof();
-			let recorder = runtime_api
-				.proof_recorder()
-				.expect("Proof recording is enabled in the line above; qed.");
-			runtime_api.register_extension(ProofSizeExt::new(recorder));
+			if self.record_proof {
+				runtime_api.record_proof();
+				let recorder = runtime_api
+					.proof_recorder()
+					.expect("Proof recording is enabled in the line above; qed.");
+				runtime_api.register_extension(ProofSizeExt::new(recorder));
+			}
 			runtime_api
 				.execute_block(genesis, block.clone())
 				.map_err(|e| Error::Client(RuntimeApiError(e)))?;
@@ -211,11 +215,13 @@ where
 		for _ in 0..self.params.repeat {
 			let block = block.clone();
 			let mut runtime_api = self.client.runtime_api();
-			runtime_api.record_proof();
-			let recorder = runtime_api
-				.proof_recorder()
-				.expect("Proof recording is enabled in the line above; qed.");
-			runtime_api.register_extension(ProofSizeExt::new(recorder));
+			if self.record_proof {
+				runtime_api.record_proof();
+				let recorder = runtime_api
+					.proof_recorder()
+					.expect("Proof recording is enabled in the line above; qed.");
+				runtime_api.register_extension(ProofSizeExt::new(recorder));
+			}
 			let start = Instant::now();
 
 			runtime_api

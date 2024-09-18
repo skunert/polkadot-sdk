@@ -445,7 +445,7 @@ pub fn run() -> Result<()> {
 							},
 							BenchmarkCmd::Overhead(cmd) => cmd
 								.run(
-									config,
+									config.chain_spec.name().to_string(),
 									client.clone(),
 									inherent_data,
 									Vec::new(),

@@ -585,6 +585,7 @@ impl PalletCmd {
 			},
 			(Some(GenesisBuilder::Runtime), _) | (None, true) =>
 				self.genesis_from_runtime::<H, F>(chain_spec)?,
+			(_, _) => return Err(format!("Nope").into()),
 		})
 	}
 
