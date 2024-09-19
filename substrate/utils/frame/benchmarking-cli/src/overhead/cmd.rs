@@ -139,6 +139,24 @@ pub(crate) enum BenchmarkType {
 	Block,
 }
 
+pub mod opaque {
+	use sp_runtime::{generic, traits::BlakeTwo256, OpaqueExtrinsic};
+
+	/// Block number
+	pub type BlockNumber = u32;
+	/// Opaque block header type.
+	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
+	/// Opaque block type.
+	pub type Block = generic::Block<Header, OpaqueExtrinsic>;
+}
+
+pub type HostFunctions = (
+	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
+	sp_io::SubstrateHostFunctions,
+);
+
+pub type OverheadClient = TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
+
 fn get_storage_from_code_bytes(
 	code_bytes: &Vec<u8>,
 	chain_type: &ChainType,
@@ -292,31 +310,55 @@ impl OverheadCmd {
 		executor: &WasmExecutor<HostFunctions>,
 		code_bytes: &Vec<u8>,
 		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
-	) -> ChainType {
+	) -> Result<ChainType> {
 		let mut ext = BasicExternalities::default();
-		let fetcher = Box::new(BasicCodeFetcher(code_bytes.clone())) as Box<dyn FetchRuntimeCode>;
-		let hash = sp_crypto_hashing::blake2_256(&code_bytes).to_vec();
-		let test = 15u32;
-		let result = executor
+		let fetcher = BasicCodeFetcher(code_bytes.into());
+		let version_result = executor
 			.call(
 				&mut ext,
-				&RuntimeCode { heap_pages: None, code_fetcher: &*fetcher, hash },
-				"Metadata_metadata_at_version",
-				&test.encode(),
+				&fetcher.runtime_code(),
+				"Metadata_metadata_versions",
+				&[],
 				CallContext::Offchain,
 			)
-			.0
-			.expect("Able to call this");
+			.0;
 
-		let metadata: Option<OpaqueMetadata> =
-			Decode::decode(&mut &result[..]).expect("Able to decode metadata");
-
-		let Some(metadata) = metadata else {
-			panic!("metadata not available");
+		let opaque_metadata: Option<OpaqueMetadata> = match version_result {
+			Ok(supported_versions) => {
+				let versions = Vec::<u32>::decode(&mut supported_versions.as_slice())
+					.map_err(|e| format!("Error {e}"))?;
+				let version_to_use = versions.last().unwrap_or(&0);
+				let parameters = (*version_to_use).encode();
+				let encoded = executor
+					.call(
+						&mut ext,
+						&fetcher.runtime_code(),
+						"Metadata_metadata_at_version",
+						&parameters,
+						CallContext::Offchain,
+					)
+					.0
+					.map_err(|e| format!("Unable to fetch metadata: {e}"))?;
+				Decode::decode(&mut encoded.as_slice())?
+			},
+			Err(_) => {
+				let encoded = executor
+					.call(
+						&mut ext,
+						&fetcher.runtime_code(),
+						"Metadata_metadata",
+						&[],
+						CallContext::Offchain,
+					)
+					.0
+					.map_err(|e| format!("Unable to fetch metadata: {e}"))?;
+				Decode::decode(&mut encoded.as_slice())?
+			},
 		};
-		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
-			.map_err(|e| tracing::error!("Error {e}"))
-			.unwrap();
+
+		let opaque_metadata = opaque_metadata.ok_or("No metadata available".to_string())?;
+
+		let metadata = subxt::Metadata::decode(&mut (*opaque_metadata).as_slice())?;
 
 		let parachain_info_exists = metadata.pallet_by_name("ParachainInfo").is_some();
 		let parachain_system_exists = metadata.pallet_by_name("ParachainSystem").is_some();
@@ -335,12 +377,13 @@ impl OverheadCmd {
 				.flatten()
 				.or(self.params.bench.para_id)
 				.unwrap_or(DEFAULT_PARA_ID);
-			return Parachain(para_id)
+			Ok(Parachain(para_id))
 		} else if para_inherent_exists {
 			log::info!("Relaychain Identified");
-			return Relaychain
+			Ok(Relaychain)
 		} else {
-			return Unknown
+			log::info!("Unknown chain Identified");
+			Ok(Unknown)
 		}
 	}
 
@@ -365,7 +408,7 @@ impl OverheadCmd {
 			.with_allow_missing_host_functions(true)
 			.build();
 
-		let chain_type = self.identify_chain(&executor, &code_bytes, chain_spec.as_ref());
+		let chain_type = self.identify_chain(&executor, &code_bytes, chain_spec.as_ref())?;
 
 		let client =
 			self.build_client_components(chain_spec.as_ref(), &code_bytes, executor, &chain_type)?;
@@ -532,10 +575,19 @@ impl BenchmarkType {
 	}
 }
 
-struct BasicCodeFetcher(pub Vec<u8>);
-impl FetchRuntimeCode for BasicCodeFetcher {
-	fn fetch_runtime_code(&self) -> Option<Cow<[u8]>> {
-		Some(Cow::from(&self.0))
+struct BasicCodeFetcher<'a>(Cow<'a, [u8]>);
+impl<'a> FetchRuntimeCode for BasicCodeFetcher<'a> {
+	fn fetch_runtime_code(&self) -> Option<Cow<'a, [u8]>> {
+		Some(self.0.clone())
+	}
+}
+impl<'a> BasicCodeFetcher<'a> {
+	pub fn runtime_code(&'a self) -> RuntimeCode<'a> {
+		RuntimeCode {
+			code_fetcher: self as &'a dyn FetchRuntimeCode,
+			heap_pages: None,
+			hash: sp_crypto_hashing::blake2_256(&self.0).to_vec(),
+		}
 	}
 }
 
@@ -554,23 +606,6 @@ impl ChainType {
 		}
 	}
 }
-
-pub mod opaque {
-	use sp_runtime::{generic, traits::BlakeTwo256, OpaqueExtrinsic};
-
-	/// Block number
-	pub type BlockNumber = u32;
-	/// Opaque block header type.
-	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
-	/// Opaque block type.
-	pub type Block = generic::Block<Header, OpaqueExtrinsic>;
-}
-
-pub type HostFunctions = (
-	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
-	sp_io::SubstrateHostFunctions,
-);
-pub type OverheadClient = TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
 
 // Boilerplate
 impl CliConfiguration for OverheadCmd {
