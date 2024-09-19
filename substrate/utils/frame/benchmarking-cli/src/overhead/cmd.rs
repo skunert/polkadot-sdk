@@ -18,6 +18,7 @@
 //! Contains the [`OverheadCmd`] as entry point for the CLI to execute
 //! the *overhead* benchmarks.
 
+use super::remark_builders::*;
 use crate::{
 	extrinsic::{
 		bench::{Benchmark, BenchmarkParams as ExtrinsicBenchmarkParams},
@@ -35,48 +36,32 @@ use codec::{Decode, Encode};
 use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
 use frame_support::{Deserialize, __private::sp_tracing::tracing};
 use log::info;
-use polkadot_parachain_primitives::primitives::{Id as ParaId, Id};
+use polkadot_parachain_primitives::primitives::Id as ParaId;
 use polkadot_primitives::v8::PersistedValidationData;
 use sc_block_builder::BlockBuilderApi;
 use sc_chain_spec::{
 	ChainSpec, ChainSpecExtension, GenericChainSpec, GenesisBlockBuilder,
-	GenesisConfigBuilderRuntimeCaller, NoExtension,
+	GenesisConfigBuilderRuntimeCaller,
 };
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
 use sc_client_api::{execution_extensions::ExecutionExtensions, UsageProvider};
 use sc_client_db::{BlocksPruning, DatabaseSettings, DatabaseSource};
 use sc_executor::WasmExecutor;
-use sc_service::{
-	new_client, new_db_backend, BasePath, ClientConfig, TFullBackend, TFullClient, TaskManager,
-};
+use sc_service::{new_client, new_db_backend, BasePath, ClientConfig, TFullClient, TaskManager};
 use serde::Serialize;
 use serde_json::json;
-use sp_api::{ApiExt, CallApiAt, Core, Metadata, ProvideRuntimeApi};
+use sp_api::{ApiExt, CallApiAt, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::{
-	crypto::AccountId32,
 	traits::{CallContext, CodeExecutor, FetchRuntimeCode, RuntimeCode},
-	OpaqueMetadata, Pair, H256,
+	OpaqueMetadata,
 };
-use sp_externalities::Externalities;
 use sp_inherents::{InherentData, InherentDataProvider};
-use sp_runtime::{
-	traits::Block as BlockT, BuildStorage, DigestItem, MultiSignature, OpaqueExtrinsic,
-};
+use sp_runtime::{traits::Block as BlockT, BuildStorage, DigestItem, OpaqueExtrinsic};
 use sp_state_machine::BasicExternalities;
 use sp_storage::{well_known_keys::CODE, Storage};
 use std::{borrow::Cow, fmt::Debug, fs, path::PathBuf, sync::Arc};
-use subxt::{
-	client::RuntimeVersion,
-	config::{
-		substrate::{BlakeTwo256, SubstrateExtrinsicParamsBuilder, SubstrateHeader},
-		SubstrateExtrinsicParams,
-	},
-	ext::futures,
-	tx::Signer,
-	utils::MultiAddress,
-	Config, OfflineClient,
-};
+use subxt::ext::futures;
 
 const DEFAULT_PARA_ID: u32 = 100;
 
@@ -249,27 +234,26 @@ impl OverheadCmd {
 	) -> Result<Storage> {
 		let preset_name =
 			self.params.genesis_builder_preset.clone().unwrap_or("development".to_string());
-		match (self.params.genesis_builder, chain_spec, &self.params.runtime) {
-			(Some(GenesisBuilder::Runtime), _, Some(runtime_code_path)) =>
+		match (self.params.genesis_builder, chain_spec) {
+			(Some(GenesisBuilder::Runtime), _) =>
 				Ok(get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?),
 			// Get the genesis state from the chain spec
-			(Some(GenesisBuilder::Spec), Some(chain_spec), _) => {
+			(Some(GenesisBuilder::Spec), Some(chain_spec)) => {
 				let storage = chain_spec
 					.as_storage_builder()
 					.build_storage()
-					.map_err(|e| format!("Can not transform chain-spec to storage"))?;
+					.map_err(|e| format!("Can not transform chain-spec to storage: {}", e))?;
 				Ok(storage)
 			},
-			(Some(GenesisBuilder::SpecRuntime), Some(chain_spec), _) => {
-				let Ok(storage) = chain_spec.build_storage() else {
-					return Err("Unable to build storage from chain spec".into());
-				};
-				let Some(code_bytes) = storage.top.get(CODE) else {
-					return Err("chain spec genesis does not contain code".into());
-				};
+			(Some(GenesisBuilder::SpecRuntime), Some(chain_spec)) => {
+				let storage = chain_spec
+					.build_storage()
+					.map_err(|_| "Unable to build storage from chain spec")?;
+				let code_bytes =
+					storage.top.get(CODE).ok_or("chain spec genesis does not contain code")?;
 				Ok(get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?)
 			},
-			(_, _, _) => {
+			(_, _) => {
 				todo!()
 			},
 		}
@@ -291,7 +275,7 @@ impl OverheadCmd {
 				let storage = chain_spec
 					.as_storage_builder()
 					.build_storage()
-					.map_err(|e| format!("Can not transform chain-spec to storage"))?;
+					.map_err(|e| format!("Can not transform chain-spec to storage {}", e))?;
 				let code_bytes = storage
 					.top
 					.get(CODE)
@@ -380,6 +364,7 @@ impl OverheadCmd {
 		let executor = WasmExecutor::<HostFunctions>::builder()
 			.with_allow_missing_host_functions(true)
 			.build();
+
 		let chain_type = self.identify_chain(&executor, &code_bytes, chain_spec.as_ref());
 
 		let client =
@@ -431,14 +416,16 @@ impl OverheadCmd {
 		})?;
 
 		let storage = self.storage(&code_bytes, chain_spec, &chain_type)?;
-		let genesis_block_builder =
-			GenesisBlockBuilder::new_with_storage(storage, true, backend.clone(), executor.clone())
-				.map_err(|e| format!("Unable to build genesis block builder: {:?}", e))?;
+		let genesis_block_builder = GenesisBlockBuilder::new_with_storage(
+			storage,
+			true,
+			backend.clone(),
+			executor.clone(),
+		)?;
 
 		let tokio_runtime = sc_cli::build_runtime()?;
-		let Ok(task_manager) = TaskManager::new(tokio_runtime.handle().clone(), None) else {
-			return Err("Unable to build task manager".into());
-		};
+		let task_manager = TaskManager::new(tokio_runtime.handle().clone(), None)
+			.map_err(|_| "Unable to build task manager")?;
 
 		let client: Arc<OverheadClient> = Arc::new(new_client(
 			backend.clone(),
@@ -585,210 +572,6 @@ pub type HostFunctions = (
 );
 pub type OverheadClient = TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
 
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum EthConfig {}
-
-impl Config for EthConfig {
-	type Hash = H256;
-	type AccountId = AccountId20;
-	// type Address = MultiAddress<Self::AccountId, u32>;
-	type Address = Self::AccountId;
-	type Signature = subxt_signer::eth::Signature;
-	type Hasher = BlakeTwo256;
-	type Header = SubstrateHeader<u32, BlakeTwo256>;
-	type ExtrinsicParams = SubstrateExtrinsicParams<Self>;
-	type AssetId = u32;
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub enum AddressAccountIdConfig {}
-
-impl Config for AddressAccountIdConfig {
-	type Hash = H256;
-	type AccountId = AccountId32;
-	// type Address = MultiAddress<Self::AccountId, u32>;
-	type Address = Self::AccountId;
-	type Signature = MultiSignature;
-	type Hasher = BlakeTwo256;
-	type Header = SubstrateHeader<u32, BlakeTwo256>;
-	type ExtrinsicParams = SubstrateExtrinsicParams<Self>;
-	type AssetId = u32;
-}
-
-pub enum MultiAddressAccountIdConfig {}
-
-impl Config for MultiAddressAccountIdConfig {
-	type Hash = H256;
-	type AccountId = AccountId32;
-	type Address = MultiAddress<Self::AccountId, u32>;
-	type Signature = MultiSignature;
-	type Hasher = BlakeTwo256;
-	type Header = SubstrateHeader<u32, BlakeTwo256>;
-	type ExtrinsicParams = SubstrateExtrinsicParams<Self>;
-	type AssetId = u32;
-}
-
-struct MySigner(pub sp_core::sr25519::Pair);
-
-impl<C: Config<Hash = H256, AccountId = AccountId32, Signature = MultiSignature>> Signer<C>
-	for MySigner
-{
-	fn account_id(&self) -> C::AccountId {
-		self.0.public().0.into()
-	}
-
-	fn address(&self) -> C::Address {
-		C::Address::from(<MySigner as subxt::tx::Signer<C>>::account_id(self))
-	}
-
-	fn sign(&self, signer_payload: &[u8]) -> C::Signature {
-		self.0.sign(signer_payload).into()
-	}
-}
-
-struct DynamicRemarkBuilder<C: Config<Hash = H256>> {
-	offline_client: OfflineClient<C>,
-}
-
-impl<C: Config<Hash = H256>> DynamicRemarkBuilder<C> {
-	fn new<Client>(client: Arc<Client>) -> Self
-	where
-		Client: UsageProvider<opaque::Block> + HeaderBackend<opaque::Block>,
-		Client: ProvideRuntimeApi<opaque::Block>,
-		Client::Api: Metadata<opaque::Block> + Core<opaque::Block>,
-	{
-		let genesis = client.usage_info().chain.best_hash;
-		let api = client.runtime_api();
-		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
-		let Some(latest) = supported_metadata_versions.pop() else {
-			panic!("No metadata version is supported");
-		};
-		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
-			panic!("Unable to fetch metadata");
-		};
-		let version = api.version(genesis).unwrap();
-		let runtime_version = RuntimeVersion {
-			spec_version: version.spec_version,
-			transaction_version: version.transaction_version,
-		};
-		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
-			.map_err(|e| tracing::error!("Error {e}"))
-			.unwrap();
-
-		let offline_client: OfflineClient<C> =
-			OfflineClient::new(genesis, runtime_version, metadata);
-		Self { offline_client }
-	}
-}
-
-impl<
-		C: Config<
-			Hash = H256,
-			AccountId = AccountId32,
-			Signature = MultiSignature,
-			ExtrinsicParams = SubstrateExtrinsicParams<C>,
-		>,
-	> ExtrinsicBuilder for DynamicRemarkBuilder<C>
-{
-	fn pallet(&self) -> &str {
-		"system"
-	}
-
-	fn extrinsic(&self) -> &str {
-		"remark"
-	}
-
-	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
-		let signer = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
-		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
-
-		let params = SubstrateExtrinsicParamsBuilder::<C>::new().nonce(nonce.into()).build();
-
-		// Default transaction parameters assume a nonce of 0.
-		let transaction = self
-			.offline_client
-			.tx()
-			.create_signed_offline(&dynamic_tx, &signer, params)
-			.unwrap();
-		let mut encoded = transaction.into_encoded();
-
-		OpaqueExtrinsic::from_bytes(&mut encoded).map_err(|_| "Unable to construct OpaqueExtrinsic")
-	}
-}
-
-struct EthRemarkBuilder<C: Config<Hash = H256>> {
-	offline_client: OfflineClient<C>,
-}
-
-impl<C: Config<Hash = H256>> crate::overhead::cmd::EthRemarkBuilder<C> {
-	fn new<Client>(client: Arc<Client>) -> Self
-	where
-		Client: UsageProvider<opaque::Block> + HeaderBackend<opaque::Block>,
-		Client: ProvideRuntimeApi<opaque::Block>,
-		Client::Api: Metadata<opaque::Block> + Core<opaque::Block>,
-	{
-		let genesis = client.usage_info().chain.best_hash;
-		let api = client.runtime_api();
-		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
-		let Some(latest) = supported_metadata_versions.pop() else {
-			panic!("No metadata version is supported");
-		};
-		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
-			panic!("Unable to fetch metadata");
-		};
-		let version = api.version(genesis).unwrap();
-		let runtime_version = RuntimeVersion {
-			spec_version: version.spec_version,
-			transaction_version: version.transaction_version,
-		};
-		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
-			.map_err(|e| tracing::error!("Error {e}"))
-			.unwrap();
-
-		let offline_client: OfflineClient<C> =
-			OfflineClient::new(genesis, runtime_version, metadata);
-		Self { offline_client }
-	}
-}
-
-use crate::overhead::fake_runtime_api::Runtime;
-use subxt_signer::eth::AccountId20;
-
-impl<
-		C: Config<
-			Hash = H256,
-			AccountId = AccountId20,
-			Signature = subxt_signer::eth::Signature,
-			ExtrinsicParams = SubstrateExtrinsicParams<C>,
-		>,
-	> ExtrinsicBuilder for EthRemarkBuilder<C>
-{
-	fn pallet(&self) -> &str {
-		"system"
-	}
-
-	fn extrinsic(&self) -> &str {
-		"remark"
-	}
-
-	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
-		// let signer = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
-		let signer = subxt_signer::eth::dev::alith();
-		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
-
-		let params = SubstrateExtrinsicParamsBuilder::<C>::new().nonce(nonce.into()).build();
-
-		// Default transaction parameters assume a nonce of 0.
-		let transaction = self
-			.offline_client
-			.tx()
-			.create_signed_offline(&dynamic_tx, &signer, params)
-			.unwrap();
-		let mut encoded = transaction.into_encoded();
-
-		OpaqueExtrinsic::from_bytes(&mut encoded).map_err(|_| "Unable to construct OpaqueExtrinsic")
-	}
-}
 // Boilerplate
 impl CliConfiguration for OverheadCmd {
 	fn shared_params(&self) -> &SharedParams {
