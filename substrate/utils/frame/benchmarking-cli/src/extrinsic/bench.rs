@@ -56,10 +56,6 @@ pub struct BenchmarkParams {
 	#[arg(long)]
 	pub max_ext_per_block: Option<u32>,
 
-	/// Include the benchmarked proof size in the output.
-	#[arg(long)]
-	pub enable_proof_size: bool,
-
 	/// Para Id to Benchmark
 	#[arg(long)]
 	pub para_id: Option<u32>,

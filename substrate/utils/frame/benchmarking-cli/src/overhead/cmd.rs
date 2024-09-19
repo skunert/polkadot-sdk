@@ -33,14 +33,14 @@ use crate::{
 use clap::{Args, Parser};
 use codec::{Decode, Encode};
 use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
-use frame_support::__private::sp_tracing::tracing;
+use frame_support::{Deserialize, __private::sp_tracing::tracing};
 use log::info;
-use polkadot_parachain_primitives::primitives::Id as ParaId;
+use polkadot_parachain_primitives::primitives::{Id as ParaId, Id};
 use polkadot_primitives::v8::PersistedValidationData;
 use sc_block_builder::BlockBuilderApi;
 use sc_chain_spec::{
-	ChainSpec, GenericChainSpec, GenesisBlockBuilder, GenesisConfigBuilderRuntimeCaller,
-	NoExtension,
+	ChainSpec, ChainSpecExtension, GenericChainSpec, GenesisBlockBuilder,
+	GenesisConfigBuilderRuntimeCaller, NoExtension,
 };
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
 use sc_client_api::{execution_extensions::ExecutionExtensions, UsageProvider};
@@ -126,6 +126,7 @@ pub struct OverheadParams {
 
 	#[arg(long)]
 	pub genesis_builder_preset: Option<String>,
+
 	/// How to construct the genesis state.
 	///
 	/// Uses `GenesisBuilder::Spec` by default and  `GenesisBuilder::Runtime` if `runtime` is set.
@@ -133,13 +134,14 @@ pub struct OverheadParams {
 	pub genesis_builder: Option<GenesisBuilder>,
 
 	#[arg(long)]
-	pub address_type: Option<AddressType>,
+	pub config_variant: Option<ConfigVariant>,
 }
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum, Serialize)]
-pub enum AddressType {
-	MultiAddress,
-	AccountId,
+pub enum ConfigVariant {
+	AddressIsMultiAddress,
+	AddressIsAccountId,
+	Eth,
 }
 /// Type of a benchmark.
 #[derive(Serialize, Clone, PartialEq, Copy)]
@@ -174,12 +176,20 @@ fn get_storage_from_code_bytes(
 	Ok(storage)
 }
 
+/// Creates inherent data for a given parachain ID.
+///
+/// This function constructs the inherent data required for block execution,
+/// including the relay chain state and validation data. Not all of these
+/// inherents are required for every chain. The runtime will pick the ones
+/// it requires based on their identifier.
 fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Block: BlockT>(
 	client: &Arc<Client>,
 	para_id: u32,
 ) -> InherentData {
 	let genesis = client.usage_info().chain.best_hash;
 	let header = client.header(genesis).unwrap().unwrap();
+
+	// Data for parachain system inherent. Required for all FRAME-based parachains.
 	let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
 	relay_state.included_para_head = Some(header.encode().into());
 	relay_state.para_id = ParaId::from(para_id);
@@ -194,6 +204,7 @@ fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Blo
 		horizontal_messages: Default::default(),
 	};
 
+	// Parachain inherent that is used on relay chains to perform parachain validation.
 	let para_inherent = polkadot_primitives::InherentData {
 		bitfields: Vec::new(),
 		backed_candidates: Vec::new(),
@@ -201,8 +212,10 @@ fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Blo
 		parent_header: header,
 	};
 
-	let mut inherent_data = sp_inherents::InherentData::new();
+	// Timestamp inherent that is very common in substrate chains.
 	let timestamp = sp_timestamp::InherentDataProvider::new(std::time::Duration::default().into());
+
+	let mut inherent_data = sp_inherents::InherentData::new();
 	let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
 	let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
 	let _ =
@@ -211,22 +224,29 @@ fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Blo
 	inherent_data
 }
 
+#[derive(Deserialize, Serialize, Clone, ChainSpecExtension)]
+pub struct ParachainExtension {
+	/// The id of the Parachain.
+	pub para_id: Option<u32>,
+}
+
 impl OverheadCmd {
 	fn storage(
 		&self,
 		chain_spec: Option<&Box<dyn ChainSpec>>,
-		backend: Arc<TFullBackend<opaque::Block>>,
-		executor: WasmExecutor<HostFunctions>,
 		para_id: ParaId,
 	) -> Result<(Storage, Vec<u8>)> {
-		let preset =
+		let preset_name =
 			self.params.genesis_builder_preset.clone().unwrap_or("development".to_string());
 		match (self.params.genesis_builder, chain_spec, &self.params.runtime) {
 			(Some(GenesisBuilder::Runtime), _, Some(runtime_code_path)) => {
 				let code_bytes = fs::read(runtime_code_path)
 					.map_err(|e| format!("Unable to read runtime file: {:?}", e))?;
 
-				Ok((get_storage_from_code_bytes(code_bytes.clone(), para_id, preset)?, code_bytes))
+				Ok((
+					get_storage_from_code_bytes(code_bytes.clone(), para_id, preset_name)?,
+					code_bytes,
+				))
 			},
 			// Get the genesis state from the chain spec
 			(Some(GenesisBuilder::Spec), Some(chain_spec), _) => {
@@ -249,7 +269,7 @@ impl OverheadCmd {
 					return Err("chain spec genesis does not contain code".into());
 				};
 				Ok((
-					get_storage_from_code_bytes(code_bytes.clone(), para_id, preset)?,
+					get_storage_from_code_bytes(code_bytes.clone(), para_id, preset_name)?,
 					code_bytes.clone(),
 				))
 			},
@@ -265,7 +285,7 @@ impl OverheadCmd {
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> Result<()> {
 		let runtime = sc_cli::build_runtime().expect("Can build tokio runtime");
-		let para_id = self.params.bench.para_id.unwrap_or(DEFAULT_PARA_ID);
+		let mut para_id = self.params.bench.para_id.unwrap_or(DEFAULT_PARA_ID);
 		let executor = WasmExecutor::<HostFunctions>::builder()
 			.with_allow_missing_host_functions(true)
 			.build();
@@ -280,19 +300,19 @@ impl OverheadCmd {
 
 		let chain_spec = match (chain_spec, self.shared_params.chain.clone()) {
 			(Some(chain_spec), _) => Some(chain_spec),
-			(None, Some(path)) => Some(Box::new(
-				GenericChainSpec::<NoExtension, HostFunctions>::from_json_file(path.into())
-					.map_err(|e| format!("Unable to load chain spec: {:?}", e))?,
-			) as Box<_>),
+			(None, Some(path)) => {
+				let spec = GenericChainSpec::<ParachainExtension, HostFunctions>::from_json_file(
+					path.into(),
+				)
+				.map_err(|e| format!("Unable to load chain spec: {:?}", e))?;
+				para_id = spec.extensions().para_id.unwrap_or(DEFAULT_PARA_ID);
+				log::info!("Para id from chain_spec: {:?}", para_id);
+				Some(Box::new(spec) as Box<_>)
+			},
 			(_, _) => None,
 		};
 
-		let (storage, code_bytes) = self.storage(
-			chain_spec.as_ref(),
-			backend.clone(),
-			executor.clone(),
-			ParaId::from(para_id),
-		)?;
+		let (storage, code_bytes) = self.storage(chain_spec.as_ref(), ParaId::from(para_id))?;
 
 		let chain_type = identify_chain(executor.clone(), code_bytes);
 		let genesis_block_builder =
@@ -335,14 +355,17 @@ impl OverheadCmd {
 		);
 
 		let inherent_data = create_inherent_data(&client, para_id);
-		let ext_builder: Box<dyn ExtrinsicBuilder> = match (ext_builder, &self.params.address_type)
-		{
-			(Some(ext_builder), _) => ext_builder,
-			(None, Some(AddressType::AccountId)) =>
-				Box::new(DynamicRemarkBuilder::<AddressAccountIdConfig>::new(client.clone())),
-			(None, Some(AddressType::MultiAddress)) | (None, None) =>
-				Box::new(DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(client.clone())),
-		};
+		let ext_builder: Box<dyn ExtrinsicBuilder> =
+			match (ext_builder, &self.params.config_variant) {
+				(Some(ext_builder), _) => ext_builder,
+				(None, Some(ConfigVariant::AddressIsAccountId)) =>
+					Box::new(DynamicRemarkBuilder::<AddressAccountIdConfig>::new(client.clone())),
+				(None, Some(ConfigVariant::Eth)) =>
+					Box::new(EthRemarkBuilder::<EthConfig>::new(client.clone())),
+				(None, Some(ConfigVariant::AddressIsMultiAddress)) | (None, None) => Box::new(
+					DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(client.clone()),
+				),
+			};
 
 		let digest_items = Default::default();
 
@@ -513,6 +536,21 @@ pub type HostFunctions = (
 pub type OverheadClient = TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum EthConfig {}
+
+impl Config for EthConfig {
+	type Hash = H256;
+	type AccountId = AccountId20;
+	// type Address = MultiAddress<Self::AccountId, u32>;
+	type Address = Self::AccountId;
+	type Signature = subxt_signer::eth::Signature;
+	type Hasher = BlakeTwo256;
+	type Header = SubstrateHeader<u32, BlakeTwo256>;
+	type ExtrinsicParams = SubstrateExtrinsicParams<Self>;
+	type AssetId = u32;
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum AddressAccountIdConfig {}
 
 impl Config for AddressAccountIdConfig {
@@ -612,6 +650,78 @@ impl<
 
 	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
 		let signer = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
+		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
+
+		let params = SubstrateExtrinsicParamsBuilder::<C>::new().nonce(nonce.into()).build();
+
+		// Default transaction parameters assume a nonce of 0.
+		let transaction = self
+			.offline_client
+			.tx()
+			.create_signed_offline(&dynamic_tx, &signer, params)
+			.unwrap();
+		let mut encoded = transaction.into_encoded();
+
+		OpaqueExtrinsic::from_bytes(&mut encoded).map_err(|_| "Unable to construct OpaqueExtrinsic")
+	}
+}
+
+struct EthRemarkBuilder<C: Config<Hash = H256>> {
+	offline_client: OfflineClient<C>,
+}
+
+impl<C: Config<Hash = H256>> crate::overhead::cmd::EthRemarkBuilder<C> {
+	fn new<Client>(client: Arc<Client>) -> Self
+	where
+		Client: UsageProvider<opaque::Block> + HeaderBackend<opaque::Block>,
+		Client: ProvideRuntimeApi<opaque::Block>,
+		Client::Api: Metadata<opaque::Block> + Core<opaque::Block>,
+	{
+		let genesis = client.usage_info().chain.best_hash;
+		let api = client.runtime_api();
+		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
+		let Some(latest) = supported_metadata_versions.pop() else {
+			panic!("No metadata version is supported");
+		};
+		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
+			panic!("Unable to fetch metadata");
+		};
+		let version = api.version(genesis).unwrap();
+		let runtime_version = RuntimeVersion {
+			spec_version: version.spec_version,
+			transaction_version: version.transaction_version,
+		};
+		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
+			.map_err(|e| tracing::error!("Error {e}"))
+			.unwrap();
+
+		let offline_client: OfflineClient<C> =
+			OfflineClient::new(genesis, runtime_version, metadata);
+		Self { offline_client }
+	}
+}
+
+use subxt_signer::eth::AccountId20;
+impl<
+		C: Config<
+			Hash = H256,
+			AccountId = AccountId20,
+			Signature = subxt_signer::eth::Signature,
+			ExtrinsicParams = SubstrateExtrinsicParams<C>,
+		>,
+	> ExtrinsicBuilder for EthRemarkBuilder<C>
+{
+	fn pallet(&self) -> &str {
+		"system"
+	}
+
+	fn extrinsic(&self) -> &str {
+		"remark"
+	}
+
+	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
+		// let signer = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
+		let signer = subxt_signer::eth::dev::alith();
 		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
 
 		let params = SubstrateExtrinsicParamsBuilder::<C>::new().nonce(nonce.into()).build();

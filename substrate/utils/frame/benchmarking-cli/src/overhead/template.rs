@@ -94,7 +94,7 @@ impl TemplateData {
 			params: params.clone(),
 			stats: stats.clone(),
 			ref_time,
-			proof_size: params.bench.enable_proof_size.then(|| proof_size).unwrap_or(0),
+			proof_size,
 		})
 	}
 

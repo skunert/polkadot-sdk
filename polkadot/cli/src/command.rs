@@ -450,6 +450,7 @@ pub fn run() -> Result<()> {
 									inherent_data,
 									Vec::new(),
 									&remark_builder,
+									false,
 								)
 								.map_err(Error::SubstrateCli),
 							_ => unreachable!("Ensured by the outside match; qed"),
