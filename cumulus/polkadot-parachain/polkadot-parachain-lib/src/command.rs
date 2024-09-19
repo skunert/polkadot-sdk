@@ -220,7 +220,7 @@ pub fn run<CliConfig: crate::cli::CliConfig>(cmd_config: RunConfig) -> Result<()
 						&cmd_config.runtime_resolver,
 						&cli.node_extra_args(),
 					)?;
-					node.run_benchmark_overhead_cmd(config, cmd, cmd_config.extrinsic_builder)
+					node.run_benchmark_overhead_cmd(cmd, cmd_config.extrinsic_builder)
 				}),
 				#[allow(unreachable_patterns)]
 				_ => Err("Benchmarking sub-command unsupported or compilation feature missing. \

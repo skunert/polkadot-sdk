@@ -6108,6 +6108,7 @@ dependencies = [
  "subxt-signer",
  "thiserror",
  "thousands",
+ "tokio",
 ]
 
 [[package]]

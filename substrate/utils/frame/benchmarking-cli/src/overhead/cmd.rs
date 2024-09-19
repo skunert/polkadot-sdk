@@ -60,7 +60,9 @@ use sp_core::{
 };
 use sp_externalities::Externalities;
 use sp_inherents::{InherentData, InherentDataProvider};
-use sp_runtime::{traits::Block as BlockT, DigestItem, MultiSignature, OpaqueExtrinsic};
+use sp_runtime::{
+	traits::Block as BlockT, BuildStorage, DigestItem, MultiSignature, OpaqueExtrinsic,
+};
 use sp_state_machine::BasicExternalities;
 use sp_storage::{well_known_keys::CODE, Storage};
 use std::{borrow::Cow, fmt::Debug, fs, path::PathBuf, sync::Arc};
@@ -153,26 +155,30 @@ pub(crate) enum BenchmarkType {
 }
 
 fn get_storage_from_code_bytes(
-	code_bytes: Vec<u8>,
-	para_id: ParaId,
+	code_bytes: &Vec<u8>,
+	chain_type: &ChainType,
 	preset: String,
 ) -> Result<Storage> {
-	let genesis_config_caller =
-		GenesisConfigBuilderRuntimeCaller::<HostFunctions>::new(code_bytes.as_ref());
-	log::info!("Using genesis preset to populate state: \"{}\"", preset);
-	let mut res = genesis_config_caller
+	let genesis_config_caller = GenesisConfigBuilderRuntimeCaller::<HostFunctions>::new(code_bytes);
+	log::info!("Using genesis preset to populate genesis state: \"{}\"", preset);
+	let mut preset_json = genesis_config_caller
 		.get_named_preset(Some(&preset))
 		.map_err(|e| format!("Unable to build genesis block builder: {:?}", e))?;
-	log::info!("Setting parachain id in genesis to {}", para_id);
-	if let Some(parachain_info) = res.get_mut("parachainInfo") {
-		if let Some(parachain_id) = parachain_info.get_mut("parachainId") {
-			*parachain_id = json!(para_id);
+
+	if let Parachain(para_id) = chain_type {
+		log::info!(
+			"Patching parachain id {} into genesis config for \"ParachainInfo\" pallet.",
+			para_id
+		);
+		if let Some(parachain_info) = preset_json.get_mut("parachainInfo") {
+			if let Some(parachain_id) = parachain_info.get_mut("parachainId") {
+				*parachain_id = json!(para_id);
+			}
 		}
 	}
-	let mut storage = genesis_config_caller.get_storage_for_patch(res.clone())?;
+	let mut storage = genesis_config_caller.get_storage_for_patch(preset_json.clone())?;
 	storage.top.insert(CODE.into(), code_bytes.to_vec());
 
-	log::info!("Using runtime to initialize genesis storage.");
 	Ok(storage)
 }
 
@@ -184,25 +190,31 @@ fn get_storage_from_code_bytes(
 /// it requires based on their identifier.
 fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Block: BlockT>(
 	client: &Arc<Client>,
-	para_id: u32,
+	chain_type: &ChainType,
 ) -> InherentData {
 	let genesis = client.usage_info().chain.best_hash;
 	let header = client.header(genesis).unwrap().unwrap();
 
-	// Data for parachain system inherent. Required for all FRAME-based parachains.
-	let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
-	relay_state.included_para_head = Some(header.encode().into());
-	relay_state.para_id = ParaId::from(para_id);
+	let mut inherent_data = sp_inherents::InherentData::new();
 
-	let mut vfp = PersistedValidationData::default();
-	let (root, proof) = relay_state.into_state_root_and_proof();
-	vfp.relay_parent_storage_root = root;
-	let para_data = cumulus_primitives_parachain_inherent::ParachainInherentData {
-		validation_data: vfp,
-		relay_chain_state: proof,
-		downward_messages: Default::default(),
-		horizontal_messages: Default::default(),
-	};
+	// Para inherent can only makes sense when we are handling a parachain.
+	if let Parachain(para_id) = chain_type {
+		// Data for parachain system inherent. Required for all FRAME-based parachains.
+		let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
+		relay_state.included_para_head = Some(header.encode().into());
+		relay_state.para_id = ParaId::from(*para_id);
+
+		let mut vfp = PersistedValidationData::default();
+		let (root, proof) = relay_state.into_state_root_and_proof();
+		vfp.relay_parent_storage_root = root;
+		let para_data = cumulus_primitives_parachain_inherent::ParachainInherentData {
+			validation_data: vfp,
+			relay_chain_state: proof,
+			downward_messages: Default::default(),
+			horizontal_messages: Default::default(),
+		};
+		let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
+	}
 
 	// Parachain inherent that is used on relay chains to perform parachain validation.
 	let para_inherent = polkadot_primitives::InherentData {
@@ -215,9 +227,7 @@ fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Blo
 	// Timestamp inherent that is very common in substrate chains.
 	let timestamp = sp_timestamp::InherentDataProvider::new(std::time::Duration::default().into());
 
-	let mut inherent_data = sp_inherents::InherentData::new();
 	let _ = futures::executor::block_on(timestamp.provide_inherent_data(&mut inherent_data));
-	let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
 	let _ =
 		inherent_data.put_data(polkadot_primitives::PARACHAINS_INHERENT_IDENTIFIER, &para_inherent);
 
@@ -233,23 +243,51 @@ pub struct ParachainExtension {
 impl OverheadCmd {
 	fn storage(
 		&self,
-		chain_spec: Option<&Box<dyn ChainSpec>>,
-		para_id: ParaId,
-	) -> Result<(Storage, Vec<u8>)> {
+		code_bytes: &Vec<u8>,
+		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
+		chain_type: &ChainType,
+	) -> Result<Storage> {
 		let preset_name =
 			self.params.genesis_builder_preset.clone().unwrap_or("development".to_string());
 		match (self.params.genesis_builder, chain_spec, &self.params.runtime) {
-			(Some(GenesisBuilder::Runtime), _, Some(runtime_code_path)) => {
+			(Some(GenesisBuilder::Runtime), _, Some(runtime_code_path)) =>
+				Ok(get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?),
+			// Get the genesis state from the chain spec
+			(Some(GenesisBuilder::Spec), Some(chain_spec), _) => {
+				let storage = chain_spec
+					.as_storage_builder()
+					.build_storage()
+					.map_err(|e| format!("Can not transform chain-spec to storage"))?;
+				Ok(storage)
+			},
+			(Some(GenesisBuilder::SpecRuntime), Some(chain_spec), _) => {
+				let Ok(storage) = chain_spec.build_storage() else {
+					return Err("Unable to build storage from chain spec".into());
+				};
+				let Some(code_bytes) = storage.top.get(CODE) else {
+					return Err("chain spec genesis does not contain code".into());
+				};
+				Ok(get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?)
+			},
+			(_, _, _) => {
+				todo!()
+			},
+		}
+	}
+
+	fn get_code_bytes(
+		&self,
+		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
+	) -> Result<Vec<u8>> {
+		match (chain_spec, &self.params.runtime) {
+			(_, Some(runtime_code_path)) => {
 				let code_bytes = fs::read(runtime_code_path)
 					.map_err(|e| format!("Unable to read runtime file: {:?}", e))?;
 
-				Ok((
-					get_storage_from_code_bytes(code_bytes.clone(), para_id, preset_name)?,
-					code_bytes,
-				))
+				Ok(code_bytes)
 			},
 			// Get the genesis state from the chain spec
-			(Some(GenesisBuilder::Spec), Some(chain_spec), _) => {
+			(Some(chain_spec), _) => {
 				let storage = chain_spec
 					.as_storage_builder()
 					.build_storage()
@@ -259,102 +297,96 @@ impl OverheadCmd {
 					.get(CODE)
 					.ok_or("chain spec genesis does not contain code")?
 					.clone();
-				Ok((storage, code_bytes))
+				Ok(code_bytes)
 			},
-			(Some(GenesisBuilder::SpecRuntime), Some(chain_spec), _) => {
-				let Ok(storage) = chain_spec.build_storage() else {
-					return Err("Unable to build storage from chain spec".into());
-				};
-				let Some(code_bytes) = storage.top.get(CODE) else {
-					return Err("chain spec genesis does not contain code".into());
-				};
-				Ok((
-					get_storage_from_code_bytes(code_bytes.clone(), para_id, preset_name)?,
-					code_bytes.clone(),
-				))
-			},
-			(_, _, _) => {
-				todo!()
-			},
+			(_, _) => Err("Please provide either a runtime or a chain spec.".into()),
 		}
 	}
 
-	pub fn run_with_spec(
+	fn identify_chain(
 		&self,
-		chain_spec: Option<Box<dyn ChainSpec>>,
+		executor: &WasmExecutor<HostFunctions>,
+		code_bytes: &Vec<u8>,
+		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
+	) -> ChainType {
+		let mut ext = BasicExternalities::default();
+		let fetcher = Box::new(BasicCodeFetcher(code_bytes.clone())) as Box<dyn FetchRuntimeCode>;
+		let hash = sp_crypto_hashing::blake2_256(&code_bytes).to_vec();
+		let test = 15u32;
+		let result = executor
+			.call(
+				&mut ext,
+				&RuntimeCode { heap_pages: None, code_fetcher: &*fetcher, hash },
+				"Metadata_metadata_at_version",
+				&test.encode(),
+				CallContext::Offchain,
+			)
+			.0
+			.expect("Able to call this");
+
+		let metadata: Option<OpaqueMetadata> =
+			Decode::decode(&mut &result[..]).expect("Able to decode metadata");
+
+		let Some(metadata) = metadata else {
+			panic!("metadata not available");
+		};
+		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
+			.map_err(|e| tracing::error!("Error {e}"))
+			.unwrap();
+
+		let parachain_info_exists = metadata.pallet_by_name("ParachainInfo").is_some();
+		let parachain_system_exists = metadata.pallet_by_name("ParachainSystem").is_some();
+		let para_inherent_exists = metadata.pallet_by_name("ParaInherent").is_some();
+
+		log::info!("Identifying pallets:");
+		log::info!("{} ParachainSystem", if parachain_system_exists { "✅" } else { "❌" });
+		log::info!("{} ParachainInfo", if parachain_info_exists { "✅" } else { "❌" });
+		log::info!("{} ParaInherent", if para_inherent_exists { "✅" } else { "❌" });
+
+		if parachain_system_exists && parachain_info_exists {
+			log::info!("Parachain Identified");
+			// Para id from spec takes precedence.
+			let para_id = chain_spec
+				.map(|spec| spec.extensions().para_id)
+				.flatten()
+				.or(self.params.bench.para_id)
+				.unwrap_or(DEFAULT_PARA_ID);
+			return Parachain(para_id)
+		} else if para_inherent_exists {
+			log::info!("Relaychain Identified");
+			return Relaychain
+		} else {
+			return Unknown
+		}
+	}
+
+	/// Run the benchmark overhead command.
+	pub fn run_with_extrinsic_builder(
+		&self,
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> Result<()> {
-		let runtime = sc_cli::build_runtime().expect("Can build tokio runtime");
-		let mut para_id = self.params.bench.para_id.unwrap_or(DEFAULT_PARA_ID);
+		let chain_spec = self
+			.shared_params
+			.chain
+			.clone()
+			.map(|path| {
+				GenericChainSpec::<ParachainExtension, HostFunctions>::from_json_file(path.into())
+					.map_err(|e| format!("Unable to load chain spec: {:?}", e))
+			})
+			.transpose()?;
+
+		let code_bytes = self.get_code_bytes(chain_spec.as_ref())?;
+
 		let executor = WasmExecutor::<HostFunctions>::builder()
 			.with_allow_missing_host_functions(true)
 			.build();
+		let chain_type = self.identify_chain(&executor, &code_bytes, chain_spec.as_ref());
 
-		let base_path = BasePath::new_temp_dir()?;
-		let backend = new_db_backend(DatabaseSettings {
-			trie_cache_maximum_size: Some(1024),
-			state_pruning: None,
-			blocks_pruning: BlocksPruning::KeepAll,
-			source: DatabaseSource::RocksDb { cache_size: 1024, path: base_path.path().into() },
-		})?;
+		let client =
+			self.build_client_components(chain_spec.as_ref(), &code_bytes, executor, &chain_type)?;
 
-		let chain_spec = match (chain_spec, self.shared_params.chain.clone()) {
-			(Some(chain_spec), _) => Some(chain_spec),
-			(None, Some(path)) => {
-				let spec = GenericChainSpec::<ParachainExtension, HostFunctions>::from_json_file(
-					path.into(),
-				)
-				.map_err(|e| format!("Unable to load chain spec: {:?}", e))?;
-				para_id = spec.extensions().para_id.unwrap_or(DEFAULT_PARA_ID);
-				log::info!("Para id from chain_spec: {:?}", para_id);
-				Some(Box::new(spec) as Box<_>)
-			},
-			(_, _) => None,
-		};
+		let inherent_data = create_inherent_data(&client, &chain_type);
 
-		let (storage, code_bytes) = self.storage(chain_spec.as_ref(), ParaId::from(para_id))?;
-
-		let chain_type = identify_chain(executor.clone(), code_bytes);
-		let genesis_block_builder =
-			GenesisBlockBuilder::new_with_storage(storage, true, backend.clone(), executor.clone())
-				.map_err(|e| format!("Unable to build genesis block builder: {:?}", e))?;
-
-		let Ok(task_manager) = TaskManager::new(runtime.handle().clone(), None) else {
-			return Err("Unable to build task manager".into());
-		};
-
-		let extensions = ExecutionExtensions::new(None, Arc::new(executor.clone()));
-
-		let enable_import_proof_recording = match chain_type {
-			Parachain => true,
-			Relaychain => false,
-			Unknown => false,
-		};
-
-		let client: Arc<OverheadClient> = Arc::new(
-			new_client(
-				backend.clone(),
-				executor.clone(),
-				genesis_block_builder,
-				Default::default(),
-				Default::default(),
-				extensions,
-				Box::new(task_manager.spawn_handle()),
-				None,
-				None,
-				ClientConfig {
-					offchain_worker_enabled: false,
-					offchain_indexing_api: false,
-					wasm_runtime_overrides: None,
-					no_genesis: false,
-					wasm_runtime_substitutes: Default::default(),
-					enable_import_proof_recording,
-				},
-			)
-			.expect("Can build client"),
-		);
-
-		let inherent_data = create_inherent_data(&client, para_id);
 		let ext_builder: Box<dyn ExtrinsicBuilder> =
 			match (ext_builder, &self.params.config_variant) {
 				(Some(ext_builder), _) => ext_builder,
@@ -375,9 +407,62 @@ impl OverheadCmd {
 			inherent_data,
 			digest_items,
 			&*ext_builder,
-			enable_import_proof_recording,
+			chain_type.requires_proof_recording(),
 		)
 	}
+
+	fn build_client_components(
+		&self,
+		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
+		code_bytes: &Vec<u8>,
+		executor: WasmExecutor<HostFunctions>,
+		chain_type: &ChainType,
+	) -> Result<Arc<OverheadClient>> {
+		let extensions = ExecutionExtensions::new(None, Arc::new(executor.clone()));
+
+		let backend = new_db_backend(DatabaseSettings {
+			trie_cache_maximum_size: self.trie_cache_maximum_size()?,
+			state_pruning: None,
+			blocks_pruning: BlocksPruning::KeepAll,
+			source: DatabaseSource::RocksDb {
+				cache_size: self.database_cache_size()?.unwrap_or(1024),
+				path: BasePath::new_temp_dir()?.path().into(),
+			},
+		})?;
+
+		let storage = self.storage(&code_bytes, chain_spec, &chain_type)?;
+		let genesis_block_builder =
+			GenesisBlockBuilder::new_with_storage(storage, true, backend.clone(), executor.clone())
+				.map_err(|e| format!("Unable to build genesis block builder: {:?}", e))?;
+
+		let tokio_runtime = sc_cli::build_runtime()?;
+		let Ok(task_manager) = TaskManager::new(tokio_runtime.handle().clone(), None) else {
+			return Err("Unable to build task manager".into());
+		};
+
+		let client: Arc<OverheadClient> = Arc::new(new_client(
+			backend.clone(),
+			executor,
+			genesis_block_builder,
+			Default::default(),
+			Default::default(),
+			extensions,
+			Box::new(task_manager.spawn_handle()),
+			None,
+			None,
+			ClientConfig {
+				offchain_worker_enabled: false,
+				offchain_indexing_api: false,
+				wasm_runtime_overrides: None,
+				no_genesis: false,
+				wasm_runtime_substitutes: Default::default(),
+				enable_import_proof_recording: chain_type.requires_proof_recording(),
+			},
+		)?);
+
+		Ok(client)
+	}
+
 	/// Measure the per-block and per-extrinsic execution overhead.
 	///
 	/// Writes the results to console and into two instances of the
@@ -402,7 +487,7 @@ impl OverheadCmd {
 		if ext_builder.pallet() != "system" || ext_builder.extrinsic() != "remark" {
 			return Err(format!("The extrinsic builder is required to build `System::Remark` extrinsics but builds `{}` extrinsics instead", ext_builder.name()).into());
 		}
-		info!("Recording proof: {}", should_record_proof);
+
 		let bench = Benchmark::new(
 			client,
 			self.params.bench.clone(),
@@ -468,53 +553,18 @@ impl FetchRuntimeCode for BasicCodeFetcher {
 }
 
 enum ChainType {
-	Parachain,
+	Parachain(u32),
 	Relaychain,
 	Unknown,
 }
-fn identify_chain(executor: WasmExecutor<HostFunctions>, code_bytes: Vec<u8>) -> ChainType {
-	let mut ext = BasicExternalities::default();
-	let fetcher = Box::new(BasicCodeFetcher(code_bytes.clone())) as Box<dyn FetchRuntimeCode>;
-	let hash = sp_crypto_hashing::blake2_256(&code_bytes).to_vec();
-	let test = 15u32;
-	let result = executor
-		.call(
-			&mut ext,
-			&RuntimeCode { heap_pages: None, code_fetcher: &*fetcher, hash },
-			"Metadata_metadata_at_version",
-			&test.encode(),
-			CallContext::Offchain,
-		)
-		.0
-		.expect("Able to call this");
 
-	let metadata: Option<OpaqueMetadata> =
-		Decode::decode(&mut &result[..]).expect("Able to decode metadata");
-
-	let Some(metadata) = metadata else {
-		panic!("metadata not available");
-	};
-	let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
-		.map_err(|e| tracing::error!("Error {e}"))
-		.unwrap();
-
-	let parachain_info_exists = metadata.pallet_by_name("ParachainInfo").is_some();
-	let parachain_system_exists = metadata.pallet_by_name("ParachainSystem").is_some();
-	let para_inherent_exists = metadata.pallet_by_name("ParaInherent").is_some();
-
-	log::info!("Identifying pallets:");
-	log::info!("{} ParachainSystem", if parachain_system_exists { "✅" } else { "❌" });
-	log::info!("{} ParachainInfo", if parachain_info_exists { "✅" } else { "❌" });
-	log::info!("{} ParaInherent", if para_inherent_exists { "✅" } else { "❌" });
-
-	if parachain_system_exists && parachain_info_exists {
-		log::info!("Parachain Identified");
-		return Parachain
-	} else if para_inherent_exists {
-		log::info!("Relaychain Identified");
-		return Relaychain
-	} else {
-		return Unknown
+impl ChainType {
+	fn requires_proof_recording(&self) -> bool {
+		match self {
+			Parachain(_) => true,
+			Relaychain => false,
+			Unknown => false,
+		}
 	}
 }
 
@@ -701,7 +751,9 @@ impl<C: Config<Hash = H256>> crate::overhead::cmd::EthRemarkBuilder<C> {
 	}
 }
 
+use crate::overhead::fake_runtime_api::Runtime;
 use subxt_signer::eth::AccountId20;
+
 impl<
 		C: Config<
 			Hash = H256,

@@ -81,8 +81,8 @@ pub fn preset_names() -> Vec<PresetId> {
 }
 pub fn get_preset(id: &sp_genesis_builder::PresetId) -> Option<sp_std::vec::Vec<u8>> {
 	let patch = match id.try_into() {
-		Ok("development") => testnet_genesis_with_default_endowed(Some(1000.into())),
-		Ok("local_testnet") => testnet_genesis_with_default_endowed(Some(1000.into())),
+		Ok("development") => testnet_genesis_with_default_endowed(Some(100.into())),
+		Ok("local_testnet") => testnet_genesis_with_default_endowed(Some(100.into())),
 		_ => return None,
 	};
 	Some(

@@ -41,7 +41,7 @@ use sp_core::{sr25519, Pair};
 use sp_keyring::Sr25519Keyring::Alice;
 use sp_runtime::{
 	transaction_validity::{InvalidTransaction, TransactionValidityError},
-	AccountId32, FixedU64, MultiAddress, OpaqueExtrinsic,
+	AccountId32, FixedU64, OpaqueExtrinsic,
 };
 
 /// Accounts to use for transfer transactions. Enough for 5000 transactions.
