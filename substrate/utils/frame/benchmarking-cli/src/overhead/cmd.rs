@@ -29,7 +29,7 @@ use crate::{
 		fake_runtime_api,
 		template::TemplateData,
 	},
-	shared::{GenesisBuilder, HostInfoParams, WeightParams},
+	shared::{GenesisBuilderPolicy, HostInfoParams, WeightParams},
 };
 use clap::{Args, Parser};
 use codec::{Decode, Encode};
@@ -120,7 +120,7 @@ pub struct OverheadParams {
 	///
 	/// Uses `GenesisBuilder::Spec` by default and  `GenesisBuilder::Runtime` if `runtime` is set.
 	#[arg(long, value_enum)]
-	pub genesis_builder: Option<GenesisBuilder>,
+	pub genesis_builder: Option<GenesisBuilderPolicy>,
 
 	#[arg(long)]
 	pub config_variant: Option<ConfigVariant>,
@@ -318,17 +318,17 @@ impl OverheadCmd {
 		let preset_name =
 			self.params.genesis_builder_preset.clone().unwrap_or("development".to_string());
 		match (self.params.genesis_builder, chain_spec) {
-			(Some(GenesisBuilder::Runtime), _) =>
+			(Some(GenesisBuilderPolicy::Runtime), _) =>
 				Ok(self.get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?),
 			// Get the genesis state from the chain spec
-			(Some(GenesisBuilder::Spec), Some(chain_spec)) => {
+			(Some(GenesisBuilderPolicy::Spec), Some(chain_spec)) => {
 				let storage = chain_spec
 					.as_storage_builder()
 					.build_storage()
 					.map_err(|e| format!("Can not transform chain-spec to storage: {}", e))?;
 				Ok(storage)
 			},
-			(Some(GenesisBuilder::SpecRuntime), Some(chain_spec)) => {
+			(Some(GenesisBuilderPolicy::SpecRuntime), Some(chain_spec)) => {
 				let storage = chain_spec
 					.build_storage()
 					.map_err(|_| "Unable to build storage from chain spec")?;
