@@ -34,7 +34,7 @@ use crate::{
 use clap::{Args, Parser};
 use codec::{Decode, Encode};
 use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
-use frame_support::{Deserialize, __private::sp_tracing::tracing};
+use frame_support::Deserialize;
 use log::info;
 use polkadot_parachain_primitives::primitives::Id as ParaId;
 use polkadot_primitives::v8::PersistedValidationData;
@@ -58,13 +58,11 @@ use sp_core::{
 	OpaqueMetadata,
 };
 use sp_inherents::{InherentData, InherentDataProvider};
-use sp_runtime::{
-	traits::Block as BlockT, BuildStorage, DigestItem, MultiAddress::Id, OpaqueExtrinsic,
-};
+use sp_runtime::{traits::Block as BlockT, BuildStorage, DigestItem, OpaqueExtrinsic};
 use sp_state_machine::BasicExternalities;
 use sp_storage::{well_known_keys::CODE, Storage};
-use std::{borrow::Cow, fmt::Debug, fs, path::PathBuf, str::FromStr, sync::Arc};
-use subxt::{ext::futures, tx::Signer};
+use std::{borrow::Cow, fmt::Debug, fs, path::PathBuf, sync::Arc};
+use subxt::ext::futures;
 use subxt_signer::{eth::Keypair as EthKeypair, DeriveJunction};
 
 const DEFAULT_PARA_ID: u32 = 100;
@@ -232,7 +230,34 @@ pub struct ParachainExtension {
 	pub para_id: Option<u32>,
 }
 
-pub const SEED: &str = "bottom drive obey lake curtain smoke basket hold race lonely fit walk";
+fn generate_balances_sr25519(num_accounts: u64) -> Vec<Value> {
+	let mut accounts = Vec::new();
+	let pair = subxt_signer::sr25519::dev::alice();
+	for i in 0..num_accounts {
+		let derived = pair.derive([DeriveJunction::hard(i.to_string())]);
+		accounts.push(derived);
+	}
+	accounts
+		.into_iter()
+		.map(|keypair| serde_json::json!((AccountId32::from(keypair.public_key().0), 1u64 << 60,)))
+		.collect::<Vec<Value>>()
+}
+
+fn generate_balances_ecdsa(num_accounts: u64) -> Vec<Value> {
+	let mut accounts = Vec::new();
+	let pair = subxt_signer::ecdsa::dev::alice();
+	for i in 0..num_accounts {
+		let derived = pair.derive([DeriveJunction::hard(i.to_string())]).unwrap();
+		accounts.push(derived);
+	}
+	accounts
+		.into_iter()
+		.map(|keypair| {
+			let eth = EthKeypair::from(keypair);
+			serde_json::json!(("0x".to_string() + &hex::encode(eth.account_id()), 1u64 << 60,))
+		})
+		.collect::<Vec<Value>>()
+}
 
 impl OverheadCmd {
 	fn get_storage_from_code_bytes(
@@ -263,75 +288,27 @@ impl OverheadCmd {
 		}
 
 		if let Some(num_accounts) = self.params.account_num {
-			match &self.params.generate_accounts {
-				Some(AccountType::Sr25519) => {
-					// Attempt to patch balances
-					if let Some(balances) = preset_json
-						.get_mut("balances")
-						.and_then(|info| info.get_mut("balances"))
-						.and_then(|balance| balance.as_array_mut())
-					{
-						let mut accounts = Vec::new();
-						let pair = subxt_signer::sr25519::dev::alice();
-						for i in 0..num_accounts {
-							let derived = pair.derive([DeriveJunction::hard(i.to_string())]);
-							accounts.push(derived);
-						}
-						let values = accounts
-							.into_iter()
-							.map(|keypair| {
-								serde_json::json!((
-									AccountId32::from(keypair.public_key().0),
-									1u64 << 60,
-								))
-							})
-							.collect::<Vec<Value>>();
-						balances.extend(values);
-					} else {
-						log::warn!("No balances found.");
-					}
-				},
-				Some(AccountType::ECDSA) => {
-					// Attempt to patch balances
-					if let Some(balances) = preset_json
-						.get_mut("balances")
-						.and_then(|info| info.get_mut("balances"))
-						.and_then(|balance| balance.as_array_mut())
-					{
-						let mut accounts = Vec::new();
-						let pair = subxt_signer::ecdsa::dev::alice();
-						for i in 0..num_accounts {
-							let derived =
-								pair.derive([DeriveJunction::hard(i.to_string())]).unwrap();
-							accounts.push(derived);
-						}
-						let values = accounts
-							.into_iter()
-							.map(|keypair| {
-								let eth = EthKeypair::from(keypair);
-								serde_json::json!((
-									"0x".to_string() + &hex::encode(eth.account_id()),
-									1u64 << 60,
-								))
-							})
-							.collect::<Vec<Value>>();
-						log::info!("Balances: {balances:?}");
-						balances.extend(values);
-						log::info!("Patched balances: {balances:?}");
-					} else {
-						log::warn!("No balances found.");
-					}
-				},
-				_ => {
-					log::warn!("Not patching any balances.");
-				},
+			// Attempt to patch balances
+			if let Some(balances) = preset_json
+				.get_mut("balances")
+				.and_then(|info| info.get_mut("balances"))
+				.and_then(|balance| balance.as_array_mut())
+			{
+				let generated = match &self.params.generate_accounts {
+					None => Default::default(),
+					Some(AccountType::Sr25519) => generate_balances_sr25519(num_accounts),
+					Some(AccountType::ECDSA) => generate_balances_ecdsa(num_accounts),
+				};
+				balances.extend(generated);
+			} else {
+				log::warn!("No balances found.");
 			}
 		}
+
 		let mut storage = genesis_config_caller.get_storage_for_patch(preset_json)?;
 		storage.top.insert(CODE.into(), code_bytes.to_vec());
 		Ok(storage)
 	}
-
 	fn storage(
 		&self,
 		code_bytes: &Vec<u8>,
