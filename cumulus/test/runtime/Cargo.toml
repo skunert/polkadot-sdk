@@ -39,6 +39,7 @@ sp-session = { workspace = true }
 sp-consensus-aura = { workspace = true }
 sp-transaction-pool = { workspace = true }
 sp-version = { workspace = true }
+sp-weights = { workspace = true }
 
 # Cumulus
 cumulus-pallet-parachain-system = { workspace = true }

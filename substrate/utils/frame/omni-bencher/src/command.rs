@@ -140,7 +140,7 @@ impl V1SubCommand {
 							"Chain specs are not supported. Please remove `--chain={spec}` and use \
 				`--runtime=<PATH>` instead"
 						)
-						.into())
+						.into());
 					}
 
 					pallet.run_with_spec::<BlakeTwo256, HostFunctions>(None)

@@ -62,7 +62,7 @@ impl Config for MultiAddressAccountIdConfig {
 	type AssetId = u32;
 }
 
-struct MySigner(pub sp_core::sr25519::Pair);
+pub struct MySigner(pub sp_core::sr25519::Pair);
 
 impl<C: Config<Hash = H256, AccountId = AccountId32, Signature = MultiSignature>> Signer<C>
 	for MySigner

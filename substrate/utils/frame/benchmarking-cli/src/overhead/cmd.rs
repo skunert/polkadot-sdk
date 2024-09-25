@@ -49,19 +49,23 @@ use sc_client_db::{BlocksPruning, DatabaseSettings, DatabaseSource};
 use sc_executor::WasmExecutor;
 use sc_service::{new_client, new_db_backend, BasePath, ClientConfig, TFullClient, TaskManager};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use sp_api::{ApiExt, CallApiAt, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::{
+	crypto::AccountId32,
 	traits::{CallContext, CodeExecutor, FetchRuntimeCode, RuntimeCode},
 	OpaqueMetadata,
 };
 use sp_inherents::{InherentData, InherentDataProvider};
-use sp_runtime::{traits::Block as BlockT, BuildStorage, DigestItem, OpaqueExtrinsic};
+use sp_runtime::{
+	traits::Block as BlockT, BuildStorage, DigestItem, MultiAddress::Id, OpaqueExtrinsic,
+};
 use sp_state_machine::BasicExternalities;
 use sp_storage::{well_known_keys::CODE, Storage};
-use std::{borrow::Cow, fmt::Debug, fs, path::PathBuf, sync::Arc};
-use subxt::ext::futures;
+use std::{borrow::Cow, fmt::Debug, fs, path::PathBuf, str::FromStr, sync::Arc};
+use subxt::{ext::futures, tx::Signer};
+use subxt_signer::{eth::Keypair as EthKeypair, DeriveJunction};
 
 const DEFAULT_PARA_ID: u32 = 100;
 
@@ -122,6 +126,12 @@ pub struct OverheadParams {
 
 	#[arg(long)]
 	pub config_variant: Option<ConfigVariant>,
+
+	#[arg(long)]
+	pub generate_accounts: Option<AccountType>,
+
+	#[arg(long)]
+	pub account_num: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum, Serialize)]
@@ -130,6 +140,13 @@ pub enum ConfigVariant {
 	AddressIsAccountId,
 	Eth,
 }
+
+#[derive(Debug, Clone, PartialEq, clap::ValueEnum, Serialize)]
+pub enum AccountType {
+	Sr25519,
+	ECDSA,
+}
+
 /// Type of a benchmark.
 #[derive(Serialize, Clone, PartialEq, Copy)]
 pub(crate) enum BenchmarkType {
@@ -156,34 +173,6 @@ pub type HostFunctions = (
 );
 
 pub type OverheadClient = TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
-
-fn get_storage_from_code_bytes(
-	code_bytes: &Vec<u8>,
-	chain_type: &ChainType,
-	preset: String,
-) -> Result<Storage> {
-	let genesis_config_caller = GenesisConfigBuilderRuntimeCaller::<HostFunctions>::new(code_bytes);
-	log::info!("Using genesis preset to populate genesis state: \"{}\"", preset);
-	let mut preset_json = genesis_config_caller
-		.get_named_preset(Some(&preset))
-		.map_err(|e| format!("Unable to build genesis block builder: {:?}", e))?;
-
-	if let Parachain(para_id) = chain_type {
-		log::info!(
-			"Patching parachain id {} into genesis config for \"ParachainInfo\" pallet.",
-			para_id
-		);
-		if let Some(parachain_info) = preset_json.get_mut("parachainInfo") {
-			if let Some(parachain_id) = parachain_info.get_mut("parachainId") {
-				*parachain_id = json!(para_id);
-			}
-		}
-	}
-	let mut storage = genesis_config_caller.get_storage_for_patch(preset_json.clone())?;
-	storage.top.insert(CODE.into(), code_bytes.to_vec());
-
-	Ok(storage)
-}
 
 /// Creates inherent data for a given parachain ID.
 ///
@@ -243,7 +232,106 @@ pub struct ParachainExtension {
 	pub para_id: Option<u32>,
 }
 
+pub const SEED: &str = "bottom drive obey lake curtain smoke basket hold race lonely fit walk";
+
 impl OverheadCmd {
+	fn get_storage_from_code_bytes(
+		&self,
+		code_bytes: &Vec<u8>,
+		chain_type: &ChainType,
+		preset: String,
+	) -> Result<Storage> {
+		let genesis_config_caller =
+			GenesisConfigBuilderRuntimeCaller::<HostFunctions>::new(code_bytes);
+		log::info!("Using genesis preset to populate genesis state: \"{}\"", preset);
+		let mut preset_json = genesis_config_caller.get_named_preset(Some(&preset))?;
+
+		if let Parachain(para_id) = chain_type {
+			if let Some(parachain_id) = preset_json
+				.get_mut("parachainInfo")
+				.and_then(|info| info.get_mut("parachainId"))
+			{
+				log::info!(
+					"Patching parachain id {} into genesis config for \"ParachainInfo\" pallet.",
+					para_id
+				);
+				*parachain_id = json!(para_id);
+			} else {
+				log::warn!("Was expecting \"ParachainInfo\" genesis config, but not entry was found. Unable to patch parachain ID.");
+				log::debug!("{preset_json:?}");
+			}
+		}
+
+		if let Some(num_accounts) = self.params.account_num {
+			match &self.params.generate_accounts {
+				Some(AccountType::Sr25519) => {
+					// Attempt to patch balances
+					if let Some(balances) = preset_json
+						.get_mut("balances")
+						.and_then(|info| info.get_mut("balances"))
+						.and_then(|balance| balance.as_array_mut())
+					{
+						let mut accounts = Vec::new();
+						let pair = subxt_signer::sr25519::dev::alice();
+						for i in 0..num_accounts {
+							let derived = pair.derive([DeriveJunction::hard(i.to_string())]);
+							accounts.push(derived);
+						}
+						let values = accounts
+							.into_iter()
+							.map(|keypair| {
+								serde_json::json!((
+									AccountId32::from(keypair.public_key().0),
+									1u64 << 60,
+								))
+							})
+							.collect::<Vec<Value>>();
+						balances.extend(values);
+					} else {
+						log::warn!("No balances found.");
+					}
+				},
+				Some(AccountType::ECDSA) => {
+					// Attempt to patch balances
+					if let Some(balances) = preset_json
+						.get_mut("balances")
+						.and_then(|info| info.get_mut("balances"))
+						.and_then(|balance| balance.as_array_mut())
+					{
+						let mut accounts = Vec::new();
+						let pair = subxt_signer::ecdsa::dev::alice();
+						for i in 0..num_accounts {
+							let derived =
+								pair.derive([DeriveJunction::hard(i.to_string())]).unwrap();
+							accounts.push(derived);
+						}
+						let values = accounts
+							.into_iter()
+							.map(|keypair| {
+								let eth = EthKeypair::from(keypair);
+								serde_json::json!((
+									"0x".to_string() + &hex::encode(eth.account_id()),
+									1u64 << 60,
+								))
+							})
+							.collect::<Vec<Value>>();
+						log::info!("Balances: {balances:?}");
+						balances.extend(values);
+						log::info!("Patched balances: {balances:?}");
+					} else {
+						log::warn!("No balances found.");
+					}
+				},
+				_ => {
+					log::warn!("Not patching any balances.");
+				},
+			}
+		}
+		let mut storage = genesis_config_caller.get_storage_for_patch(preset_json)?;
+		storage.top.insert(CODE.into(), code_bytes.to_vec());
+		Ok(storage)
+	}
+
 	fn storage(
 		&self,
 		code_bytes: &Vec<u8>,
@@ -254,7 +342,7 @@ impl OverheadCmd {
 			self.params.genesis_builder_preset.clone().unwrap_or("development".to_string());
 		match (self.params.genesis_builder, chain_spec) {
 			(Some(GenesisBuilder::Runtime), _) =>
-				Ok(get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?),
+				Ok(self.get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?),
 			// Get the genesis state from the chain spec
 			(Some(GenesisBuilder::Spec), Some(chain_spec)) => {
 				let storage = chain_spec
@@ -269,7 +357,7 @@ impl OverheadCmd {
 					.map_err(|_| "Unable to build storage from chain spec")?;
 				let code_bytes =
 					storage.top.get(CODE).ok_or("chain spec genesis does not contain code")?;
-				Ok(get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?)
+				Ok(self.get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?)
 			},
 			(_, _) => {
 				todo!()

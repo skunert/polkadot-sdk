@@ -74,6 +74,7 @@ polkadot-primitives = { workspace = true, default-features = true }
 cumulus-test-relay-sproof-builder = { workspace = true, default-features = true }
 gethostname = { workspace = true }
 tokio = { workspace = true, default-features = true }
+hex = "0.4.3"
 
 [features]
 default = ["rocksdb"]

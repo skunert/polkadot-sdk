@@ -4667,6 +4667,7 @@ dependencies = [
  "sp-session",
  "sp-transaction-pool",
  "sp-version",
+ "sp-weights 27.0.0",
  "staging-parachain-info",
  "substrate-wasm-builder",
 ]
@@ -6064,6 +6065,7 @@ dependencies = [
  "frame-system",
  "gethostname",
  "handlebars",
+ "hex",
  "itertools 0.11.0",
  "lazy_static",
  "linked-hash-map",
