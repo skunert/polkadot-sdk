@@ -29,7 +29,7 @@ use crate::{
 		fake_runtime_api,
 		template::TemplateData,
 	},
-	shared::{GenesisBuilderPolicy, HostInfoParams, WeightParams},
+	shared::{self, GenesisBuilderPolicy, HostInfoParams, WeightParams},
 };
 use clap::{Args, Parser};
 use codec::{Decode, Encode};
@@ -342,34 +342,6 @@ impl OverheadCmd {
 		}
 	}
 
-	fn get_code_bytes(
-		&self,
-		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
-	) -> Result<Vec<u8>> {
-		match (chain_spec, &self.params.runtime) {
-			(_, Some(runtime_code_path)) => {
-				let code_bytes = fs::read(runtime_code_path)
-					.map_err(|e| format!("Unable to read runtime file: {:?}", e))?;
-
-				Ok(code_bytes)
-			},
-			// Get the genesis state from the chain spec
-			(Some(chain_spec), _) => {
-				let storage = chain_spec
-					.as_storage_builder()
-					.build_storage()
-					.map_err(|e| format!("Can not transform chain-spec to storage {}", e))?;
-				let code_bytes = storage
-					.top
-					.get(CODE)
-					.ok_or("chain spec genesis does not contain code")?
-					.clone();
-				Ok(code_bytes)
-			},
-			(_, _) => Err("Please provide either a runtime or a chain spec.".into()),
-		}
-	}
-
 	fn identify_chain(
 		&self,
 		executor: &WasmExecutor<HostFunctions>,
@@ -467,7 +439,10 @@ impl OverheadCmd {
 			})
 			.transpose()?;
 
-		let code_bytes = self.get_code_bytes(chain_spec.as_ref())?;
+		let code_bytes = shared::genesis_state::get_code_bytes(
+			chain_spec.as_ref(),
+			self.params.runtime.as_ref(),
+		)?;
 
 		let executor = WasmExecutor::<HostFunctions>::builder()
 			.with_allow_missing_host_functions(true)
