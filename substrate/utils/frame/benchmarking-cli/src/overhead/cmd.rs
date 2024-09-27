@@ -41,7 +41,6 @@ use polkadot_primitives::v8::PersistedValidationData;
 use sc_block_builder::BlockBuilderApi;
 use sc_chain_spec::{
 	ChainSpec, ChainSpecExtension, GenericChainSpec, GenesisBlockBuilder,
-	GenesisConfigBuilderRuntimeCaller,
 };
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
 use sc_client_api::{execution_extensions::ExecutionExtensions, UsageProvider};
@@ -58,10 +57,14 @@ use sp_core::{
 	OpaqueMetadata,
 };
 use sp_inherents::{InherentData, InherentDataProvider};
-use sp_runtime::{traits::Block as BlockT, BuildStorage, DigestItem, OpaqueExtrinsic};
+use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
 use sp_state_machine::BasicExternalities;
-use sp_storage::{well_known_keys::CODE, Storage};
-use std::{borrow::Cow, fmt::Debug, fs, path::PathBuf, sync::Arc};
+use std::{
+	borrow::Cow,
+	fmt::Debug,
+	path::PathBuf,
+	sync::Arc,
+};
 use subxt::ext::futures;
 use subxt_signer::{eth::Keypair as EthKeypair, DeriveJunction};
 
@@ -129,7 +132,7 @@ pub struct OverheadParams {
 	pub generate_accounts: Option<AccountType>,
 
 	#[arg(long)]
-	pub account_num: Option<u64>,
+	pub num_accounts: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum, Serialize)]
@@ -259,19 +262,28 @@ fn generate_balances_ecdsa(num_accounts: u64) -> Vec<Value> {
 		.collect::<Vec<Value>>()
 }
 
-fn patch_balances(mut input_value: Value, num_accounts: Option<u64>, chain_type: ChainType, generate_accounts: Option<AccountType>) -> Value {
+fn patch_genesis(
+	mut input_value: Value,
+	num_accounts: Option<u64>,
+	chain_type: ChainType,
+	generate_accounts: Option<AccountType>,
+) -> Value {
+	// If we identified a parachain we should patch a parachain id into the genesis config.
+	// This ensures compatibility with the inherents that we provide to successfully build a
+	// block.
 	if let Parachain(para_id) = chain_type {
 		if let Some(parachain_id) = input_value
 			.get_mut("parachainInfo")
 			.and_then(|info| info.get_mut("parachainId"))
 		{
 			log::info!(
-					"Patching parachain id {} into genesis config for \"ParachainInfo\" pallet.",
-					para_id
-				);
+				"Patching parachain id {} into genesis config for \"ParachainInfo\" pallet.",
+				para_id
+			);
 			*parachain_id = json!(para_id);
 		} else {
-			log::warn!("Was expecting \"ParachainInfo\" genesis config, but not entry was found. Unable to patch parachain ID.");
+			// This branch should not be taken, since we identified before that we have a parachain.
+			log::warn!("Was expecting \"ParachainInfo\" genesis config, but no entry was found. Unable to patch parachain ID.");
 			log::debug!("{input_value:?}");
 		}
 	}
@@ -296,88 +308,89 @@ fn patch_balances(mut input_value: Value, num_accounts: Option<u64>, chain_type:
 	input_value
 }
 
+fn fetch_latest_metadata_from_blob(
+	executor: &WasmExecutor<HostFunctions>,
+	code_bytes: &Vec<u8>,
+) -> Result<OpaqueMetadata> {
+	let mut ext = BasicExternalities::default();
+	let fetcher = BasicCodeFetcher(code_bytes.into());
+	let version_result = executor
+		.call(
+			&mut ext,
+			&fetcher.runtime_code(),
+			"Metadata_metadata_versions",
+			&[],
+			CallContext::Offchain,
+		)
+		.0;
+
+	let opaque_metadata: Option<OpaqueMetadata> = match version_result {
+		Ok(supported_versions) => {
+			let versions = Vec::<u32>::decode(&mut supported_versions.as_slice())
+				.map_err(|e| format!("Error {e}"))?;
+			let version_to_use = versions.last().ok_or("No versions available.")?;
+			let parameters = (*version_to_use).encode();
+			let encoded = executor
+				.call(
+					&mut ext,
+					&fetcher.runtime_code(),
+					"Metadata_metadata_at_version",
+					&parameters,
+					CallContext::Offchain,
+				)
+				.0
+				.map_err(|e| format!("Unable to fetch metadata from blob: {e}"))?;
+			Decode::decode(&mut encoded.as_slice())?
+		},
+		Err(_) => {
+			let encoded = executor
+				.call(
+					&mut ext,
+					&fetcher.runtime_code(),
+					"Metadata_metadata",
+					&[],
+					CallContext::Offchain,
+				)
+				.0
+				.map_err(|e| format!("Unable to fetch metadata from blob: {e}"))?;
+			Decode::decode(&mut encoded.as_slice())?
+		},
+	};
+
+	Ok(opaque_metadata.ok_or("Metadata not found")?)
+}
+
 impl OverheadCmd {
 	fn identify_chain(
 		&self,
 		executor: &WasmExecutor<HostFunctions>,
 		code_bytes: &Vec<u8>,
-		para_id: Option<u32>
+		para_id: Option<u32>,
 	) -> Result<ChainType> {
-		let mut ext = BasicExternalities::default();
-		let fetcher = BasicCodeFetcher(code_bytes.into());
-		let version_result = executor
-			.call(
-				&mut ext,
-				&fetcher.runtime_code(),
-				"Metadata_metadata_versions",
-				&[],
-				CallContext::Offchain,
-			)
-			.0;
-
-		let opaque_metadata: Option<OpaqueMetadata> = match version_result {
-			Ok(supported_versions) => {
-				let versions = Vec::<u32>::decode(&mut supported_versions.as_slice())
-					.map_err(|e| format!("Error {e}"))?;
-				let version_to_use = versions.last().unwrap_or(&0);
-				let parameters = (*version_to_use).encode();
-				let encoded = executor
-					.call(
-						&mut ext,
-						&fetcher.runtime_code(),
-						"Metadata_metadata_at_version",
-						&parameters,
-						CallContext::Offchain,
-					)
-					.0
-					.map_err(|e| format!("Unable to fetch metadata: {e}"))?;
-				Decode::decode(&mut encoded.as_slice())?
-			},
-			Err(_) => {
-				let encoded = executor
-					.call(
-						&mut ext,
-						&fetcher.runtime_code(),
-						"Metadata_metadata",
-						&[],
-						CallContext::Offchain,
-					)
-					.0
-					.map_err(|e| format!("Unable to fetch metadata: {e}"))?;
-				Decode::decode(&mut encoded.as_slice())?
-			},
-		};
-
-		let opaque_metadata = opaque_metadata.ok_or("No metadata available".to_string())?;
-
+		let opaque_metadata = fetch_latest_metadata_from_blob(executor, code_bytes)?;
 		let metadata = subxt::Metadata::decode(&mut (*opaque_metadata).as_slice())?;
 
 		let parachain_info_exists = metadata.pallet_by_name("ParachainInfo").is_some();
 		let parachain_system_exists = metadata.pallet_by_name("ParachainSystem").is_some();
 		let para_inherent_exists = metadata.pallet_by_name("ParaInherent").is_some();
 
-		log::info!("Identifying pallets:");
-		log::info!("{} ParachainSystem", if parachain_system_exists { "✅" } else { "❌" });
-		log::info!("{} ParachainInfo", if parachain_info_exists { "✅" } else { "❌" });
-		log::info!("{} ParaInherent", if para_inherent_exists { "✅" } else { "❌" });
+		log::info!("Identifying chain type based on metadata.");
+		log::debug!("{} ParachainSystem", if parachain_system_exists { "✅" } else { "❌" });
+		log::debug!("{} ParachainInfo", if parachain_info_exists { "✅" } else { "❌" });
+		log::debug!("{} ParaInherent", if para_inherent_exists { "✅" } else { "❌" });
 
 		if parachain_system_exists && parachain_info_exists {
 			log::info!("Parachain Identified");
-			Ok(Parachain(para_id.unwrap_or(DEFAULT_PARA_ID)))
+			Ok(Parachain(para_id.or(self.params.bench.para_id).unwrap_or(DEFAULT_PARA_ID)))
 		} else if para_inherent_exists {
 			log::info!("Relaychain Identified");
 			Ok(Relaychain)
 		} else {
-			log::info!("Unknown chain Identified");
+			log::info!("Found Custom chain");
 			Ok(Unknown)
 		}
 	}
-
-	/// Run the benchmark overhead command.
-	pub fn run_with_extrinsic_builder(
-		&self,
-		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
-	) -> Result<()> {
+	fn chain_spec_from_path(&self) -> Result<(Option<Box<dyn ChainSpec>>, Option<u32>)> {
 		let chain_spec = self
 			.shared_params
 			.chain
@@ -388,11 +401,17 @@ impl OverheadCmd {
 			})
 			.transpose()?;
 
-		let para_id = chain_spec.as_ref()
-			.map(|spec| spec.extensions().para_id)
-			.flatten()
-			.or(self.params.bench.para_id);
-		let chain_spec: Option<Box<dyn ChainSpec>> = chain_spec.map(|cs| Box::new(cs) as Box<_>);
+		let para_id_from_chain_spec =
+			chain_spec.as_ref().map(|spec| spec.extensions().para_id).flatten();
+		Ok((chain_spec.map(|c| Box::new(c) as Box<_>), para_id_from_chain_spec))
+	}
+
+	/// Run the benchmark overhead command.
+	pub fn run_with_extrinsic_builder(
+		&self,
+		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
+	) -> Result<()> {
+		let (chain_spec, para_id_from_chain_spec) = self.chain_spec_from_path()?;
 		let code_bytes = shared::genesis_state::get_code_bytes::<HostFunctions>(
 			&chain_spec,
 			&self.params.runtime,
@@ -402,7 +421,7 @@ impl OverheadCmd {
 			.with_allow_missing_host_functions(true)
 			.build();
 
-		let chain_type = self.identify_chain(&executor, &code_bytes, para_id)?;
+		let chain_type = self.identify_chain(&executor, &code_bytes, para_id_from_chain_spec)?;
 
 		let client =
 			self.build_client_components(chain_spec, &code_bytes, executor, &chain_type)?;
@@ -454,7 +473,7 @@ impl OverheadCmd {
 
 		//let storage = self.storage(&code_bytes, chain_spec, &chain_type)?;
 		let chain_type_for_closure = chain_type.clone();
-		let num_accounts = self.params.account_num;
+		let num_accounts = self.params.num_accounts;
 		let account_type = self.params.generate_accounts.clone();
 		let storage = shared::genesis_state::genesis_storage::<HostFunctions>(
 			self.params.genesis_builder,
@@ -463,8 +482,8 @@ impl OverheadCmd {
 			&self.params.genesis_builder_preset,
 			&chain_spec,
 			Some(Box::new(move |val| {
-				patch_balances(val, num_accounts, chain_type_for_closure.clone(), account_type.clone())
-			}))
+				patch_genesis(val, num_accounts, chain_type_for_closure, account_type)
+			})),
 		)?;
 		let genesis_block_builder = GenesisBlockBuilder::new_with_storage(
 			storage,

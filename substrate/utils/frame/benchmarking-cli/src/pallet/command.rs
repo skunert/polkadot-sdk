@@ -21,7 +21,7 @@ use super::{
 };
 use crate::{
 	pallet::types::FetchedCode,
-	shared::{genesis_state::{genesis_storage, get_code_bytes}, GenesisBuilderPolicy},
+	shared::genesis_state::{genesis_storage, get_code_bytes},
 };
 use codec::{Decode, Encode};
 use frame_benchmarking::{
@@ -30,7 +30,6 @@ use frame_benchmarking::{
 };
 use frame_support::traits::StorageInfo;
 use linked_hash_map::LinkedHashMap;
-use sc_chain_spec::GenesisConfigBuilderRuntimeCaller;
 use sc_cli::{execution_method_from_cli, ChainSpec, CliConfiguration, Result, SharedParams};
 use sc_client_db::BenchmarkingState;
 use sc_executor::{HeapAllocStrategy, WasmExecutor, DEFAULT_HEAP_ALLOC_STRATEGY};
@@ -44,9 +43,8 @@ use sp_core::{
 };
 use sp_externalities::Extensions;
 use sp_keystore::{testing::MemoryKeystore, KeystoreExt};
-use sp_runtime::traits::{CheckedConversion, Hash};
+use sp_runtime::traits::Hash;
 use sp_state_machine::StateMachine;
-use sp_storage::{well_known_keys::CODE, Storage};
 use sp_trie::{proof_size_extension::ProofSizeExt, recorder::Recorder};
 use sp_wasm_interface::HostFunctions;
 use std::{
@@ -56,8 +54,6 @@ use std::{
 	str::FromStr,
 	time,
 };
-use std::any::TypeId;
-use crate::overhead::cmd::ParachainExtension;
 
 /// Logging target
 const LOG_TARGET: &'static str = "polkadot_sdk_frame::benchmark::pallet";
