@@ -33,6 +33,7 @@ use crate::{
 };
 use clap::{Args, Parser};
 use codec::{Decode, Encode};
+use cumulus_client_parachain_inherent::MockValidationDataInherentDataProvider;
 use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
 use frame_support::Deserialize;
 use log::info;
@@ -185,22 +186,15 @@ fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Blo
 
 	// Para inherent can only makes sense when we are handling a parachain.
 	if let Parachain(para_id) = chain_type {
-		// Data for parachain system inherent. Required for all FRAME-based parachains.
-		let mut relay_state = cumulus_test_relay_sproof_builder::RelayStateSproofBuilder::default();
-		relay_state.included_para_head = Some(header.encode().into());
-		relay_state.para_id = ParaId::from(*para_id);
-
-		let mut vfp = PersistedValidationData::default();
-		let (root, proof) = relay_state.into_state_root_and_proof();
-		vfp.relay_parent_storage_root = root;
-		vfp.relay_parent_number = 1;
-		let para_data = cumulus_primitives_parachain_inherent::ParachainInherentData {
-			validation_data: vfp,
-			relay_chain_state: proof,
-			downward_messages: Default::default(),
-			horizontal_messages: Default::default(),
+		let parachain_validation_data_provider = MockValidationDataInherentDataProvider::<()> {
+			para_id: ParaId::from(*para_id),
+			current_para_block_head: Some(header.encode().into()),
+			relay_offset: 1,
+			..Default::default()
 		};
-		let _ = futures::executor::block_on(para_data.provide_inherent_data(&mut inherent_data));
+		let _ = futures::executor::block_on(
+			parachain_validation_data_provider.provide_inherent_data(&mut inherent_data),
+		);
 	}
 
 	// Parachain inherent that is used on relay chains to perform parachain validation.
@@ -230,30 +224,27 @@ pub struct ParachainExtension {
 fn generate_balances_sr25519(num_accounts: u64) -> Vec<Value> {
 	let mut accounts = Vec::new();
 	let pair = subxt_signer::sr25519::dev::alice();
-	for i in 0..num_accounts {
-		let derived = pair.derive([DeriveJunction::hard(i.to_string())]);
-		accounts.push(derived);
-	}
-	accounts
+	(0..num_accounts)
 		.into_iter()
-		.map(|keypair| serde_json::json!((AccountId32::from(keypair.public_key().0), 1u64 << 60,)))
-		.collect::<Vec<Value>>()
+		.map(|path| {
+			let derived = pair.derive([DeriveJunction::hard(path.to_string())]).unwrap();
+			json!((AccountId32::from(derived.public_key().0), 1u64 << 60,))
+		})
+		.collect()
 }
 
 fn generate_balances_ecdsa(num_accounts: u64) -> Vec<Value> {
-	let mut accounts = Vec::new();
 	let pair = subxt_signer::ecdsa::dev::alice();
-	for i in 0..num_accounts {
-		let derived = pair.derive([DeriveJunction::hard(i.to_string())]).unwrap();
-		accounts.push(derived);
-	}
-	accounts
+	(0..num_accounts)
 		.into_iter()
-		.map(|keypair| {
-			let eth = EthKeypair::from(keypair);
-			serde_json::json!(("0x".to_string() + &hex::encode(eth.account_id()), 1u64 << 60,))
+		.map(|path| {
+			let derived = pair.derive([DeriveJunction::hard(path.to_string())]).unwrap();
+			json!((
+				"0x".to_string() + &hex::encode(EthKeypair::from(derived).account_id()),
+				1u64 << 60,
+			))
 		})
-		.collect::<Vec<Value>>()
+		.collect()
 }
 
 fn patch_genesis(
@@ -266,20 +257,16 @@ fn patch_genesis(
 	// This ensures compatibility with the inherents that we provide to successfully build a
 	// block.
 	if let Parachain(para_id) = chain_type {
-		if let Some(parachain_id) = input_value
-			.get_mut("parachainInfo")
-			.and_then(|info| info.get_mut("parachainId"))
-		{
-			log::info!(
-				"Patching parachain id {} into genesis config for \"ParachainInfo\" pallet.",
-				para_id
-			);
-			*parachain_id = json!(para_id);
-		} else {
-			// This branch should not be taken, since we identified before that we have a parachain.
-			log::warn!("Was expecting \"ParachainInfo\" genesis config, but no entry was found. Unable to patch parachain ID.");
-			log::debug!("{input_value:?}");
-		}
+		sc_chain_spec::json_patch::merge(
+			&mut input_value,
+			json!({
+				"parachainInfo": {
+					"parachainId": para_id,
+				}
+			}),
+		);
+		log::debug!("Genesis Config Json");
+		log::debug!("{}", input_value);
 	}
 
 	if let Some(num_accounts) = num_accounts {
@@ -479,6 +466,7 @@ impl OverheadCmd {
 				patch_genesis(val, num_accounts, chain_type_for_closure, account_type)
 			})),
 		)?;
+
 		let genesis_block_builder = GenesisBlockBuilder::new_with_storage(
 			storage,
 			true,

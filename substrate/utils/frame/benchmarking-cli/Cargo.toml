@@ -69,6 +69,7 @@ subxt = { workspace = true, features = ["substrate-compat", "native"] }
 subxt-signer = { workspace = true, features = ["unstable-eth"] }
 cumulus-primitives-proof-size-hostfunction = { workspace = true, default-features = true }
 cumulus-primitives-parachain-inherent = { workspace = true, default-features = true }
+cumulus-client-parachain-inherent = { workspace = true, default-features = true }
 polkadot-parachain-primitives = { workspace = true, default-features = true }
 polkadot-primitives = { workspace = true, default-features = true }
 cumulus-test-relay-sproof-builder = { workspace = true, default-features = true }
