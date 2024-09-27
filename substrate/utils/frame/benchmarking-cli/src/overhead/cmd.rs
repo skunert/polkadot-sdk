@@ -39,9 +39,7 @@ use log::info;
 use polkadot_parachain_primitives::primitives::Id as ParaId;
 use polkadot_primitives::v8::PersistedValidationData;
 use sc_block_builder::BlockBuilderApi;
-use sc_chain_spec::{
-	ChainSpec, ChainSpecExtension, GenericChainSpec, GenesisBlockBuilder,
-};
+use sc_chain_spec::{ChainSpec, ChainSpecExtension, GenericChainSpec, GenesisBlockBuilder};
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
 use sc_client_api::{execution_extensions::ExecutionExtensions, UsageProvider};
 use sc_client_db::{BlocksPruning, DatabaseSettings, DatabaseSource};
@@ -59,12 +57,7 @@ use sp_core::{
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
 use sp_state_machine::BasicExternalities;
-use std::{
-	borrow::Cow,
-	fmt::Debug,
-	path::PathBuf,
-	sync::Arc,
-};
+use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc};
 use subxt::ext::futures;
 use subxt_signer::{eth::Keypair as EthKeypair, DeriveJunction};
 
@@ -200,6 +193,7 @@ fn create_inherent_data<Client: UsageProvider<Block> + HeaderBackend<Block>, Blo
 		let mut vfp = PersistedValidationData::default();
 		let (root, proof) = relay_state.into_state_root_and_proof();
 		vfp.relay_parent_storage_root = root;
+		vfp.relay_parent_number = 1;
 		let para_data = cumulus_primitives_parachain_inherent::ParachainInherentData {
 			validation_data: vfp,
 			relay_chain_state: proof,
