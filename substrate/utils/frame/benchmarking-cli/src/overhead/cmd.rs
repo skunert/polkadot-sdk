@@ -113,8 +113,8 @@ pub struct OverheadParams {
 	#[arg(long, value_name = "PATH")]
 	pub runtime: Option<PathBuf>,
 
-	#[arg(long)]
-	pub genesis_builder_preset: Option<String>,
+	#[arg(long, default_value = sp_genesis_builder::DEV_RUNTIME_PRESET)]
+	pub genesis_builder_preset: String,
 
 	/// How to construct the genesis state.
 	///
@@ -259,94 +259,49 @@ fn generate_balances_ecdsa(num_accounts: u64) -> Vec<Value> {
 		.collect::<Vec<Value>>()
 }
 
-impl OverheadCmd {
-	fn get_storage_from_code_bytes(
-		&self,
-		code_bytes: &Vec<u8>,
-		chain_type: &ChainType,
-		preset: String,
-	) -> Result<Storage> {
-		let genesis_config_caller =
-			GenesisConfigBuilderRuntimeCaller::<HostFunctions>::new(code_bytes);
-		log::info!("Using genesis preset to populate genesis state: \"{}\"", preset);
-		let mut preset_json = genesis_config_caller.get_named_preset(Some(&preset))?;
-
-		if let Parachain(para_id) = chain_type {
-			if let Some(parachain_id) = preset_json
-				.get_mut("parachainInfo")
-				.and_then(|info| info.get_mut("parachainId"))
-			{
-				log::info!(
+fn patch_balances(mut input_value: Value, num_accounts: Option<u64>, chain_type: ChainType, generate_accounts: Option<AccountType>) -> Value {
+	if let Parachain(para_id) = chain_type {
+		if let Some(parachain_id) = input_value
+			.get_mut("parachainInfo")
+			.and_then(|info| info.get_mut("parachainId"))
+		{
+			log::info!(
 					"Patching parachain id {} into genesis config for \"ParachainInfo\" pallet.",
 					para_id
 				);
-				*parachain_id = json!(para_id);
-			} else {
-				log::warn!("Was expecting \"ParachainInfo\" genesis config, but not entry was found. Unable to patch parachain ID.");
-				log::debug!("{preset_json:?}");
-			}
-		}
-
-		if let Some(num_accounts) = self.params.account_num {
-			// Attempt to patch balances
-			if let Some(balances) = preset_json
-				.get_mut("balances")
-				.and_then(|info| info.get_mut("balances"))
-				.and_then(|balance| balance.as_array_mut())
-			{
-				let generated = match &self.params.generate_accounts {
-					None => Default::default(),
-					Some(AccountType::Sr25519) => generate_balances_sr25519(num_accounts),
-					Some(AccountType::ECDSA) => generate_balances_ecdsa(num_accounts),
-				};
-				balances.extend(generated);
-			} else {
-				log::warn!("No balances found.");
-			}
-		}
-
-		let mut storage = genesis_config_caller.get_storage_for_patch(preset_json)?;
-		storage.top.insert(CODE.into(), code_bytes.to_vec());
-		Ok(storage)
-	}
-	fn storage(
-		&self,
-		code_bytes: &Vec<u8>,
-		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
-		chain_type: &ChainType,
-	) -> Result<Storage> {
-		let preset_name =
-			self.params.genesis_builder_preset.clone().unwrap_or("development".to_string());
-		match (self.params.genesis_builder, chain_spec) {
-			(Some(GenesisBuilderPolicy::Runtime), _) =>
-				Ok(self.get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?),
-			// Get the genesis state from the chain spec
-			(Some(GenesisBuilderPolicy::Spec), Some(chain_spec)) => {
-				let storage = chain_spec
-					.as_storage_builder()
-					.build_storage()
-					.map_err(|e| format!("Can not transform chain-spec to storage: {}", e))?;
-				Ok(storage)
-			},
-			(Some(GenesisBuilderPolicy::SpecRuntime), Some(chain_spec)) => {
-				let storage = chain_spec
-					.build_storage()
-					.map_err(|_| "Unable to build storage from chain spec")?;
-				let code_bytes =
-					storage.top.get(CODE).ok_or("chain spec genesis does not contain code")?;
-				Ok(self.get_storage_from_code_bytes(code_bytes, chain_type, preset_name)?)
-			},
-			(_, _) => {
-				todo!()
-			},
+			*parachain_id = json!(para_id);
+		} else {
+			log::warn!("Was expecting \"ParachainInfo\" genesis config, but not entry was found. Unable to patch parachain ID.");
+			log::debug!("{input_value:?}");
 		}
 	}
 
+	if let Some(num_accounts) = num_accounts {
+		// Attempt to patch balances
+		if let Some(balances) = input_value
+			.get_mut("balances")
+			.and_then(|info| info.get_mut("balances"))
+			.and_then(|balance| balance.as_array_mut())
+		{
+			let generated = match &generate_accounts {
+				None => Default::default(),
+				Some(AccountType::Sr25519) => generate_balances_sr25519(num_accounts),
+				Some(AccountType::ECDSA) => generate_balances_ecdsa(num_accounts),
+			};
+			balances.extend(generated);
+		} else {
+			log::warn!("No balances found.");
+		}
+	}
+	input_value
+}
+
+impl OverheadCmd {
 	fn identify_chain(
 		&self,
 		executor: &WasmExecutor<HostFunctions>,
 		code_bytes: &Vec<u8>,
-		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
+		para_id: Option<u32>
 	) -> Result<ChainType> {
 		let mut ext = BasicExternalities::default();
 		let fetcher = BasicCodeFetcher(code_bytes.into());
@@ -408,13 +363,7 @@ impl OverheadCmd {
 
 		if parachain_system_exists && parachain_info_exists {
 			log::info!("Parachain Identified");
-			// Para id from spec takes precedence.
-			let para_id = chain_spec
-				.map(|spec| spec.extensions().para_id)
-				.flatten()
-				.or(self.params.bench.para_id)
-				.unwrap_or(DEFAULT_PARA_ID);
-			Ok(Parachain(para_id))
+			Ok(Parachain(para_id.unwrap_or(DEFAULT_PARA_ID)))
 		} else if para_inherent_exists {
 			log::info!("Relaychain Identified");
 			Ok(Relaychain)
@@ -439,19 +388,24 @@ impl OverheadCmd {
 			})
 			.transpose()?;
 
-		let code_bytes = shared::genesis_state::get_code_bytes(
-			chain_spec.as_ref(),
-			self.params.runtime.as_ref(),
+		let para_id = chain_spec.as_ref()
+			.map(|spec| spec.extensions().para_id)
+			.flatten()
+			.or(self.params.bench.para_id);
+		let chain_spec: Option<Box<dyn ChainSpec>> = chain_spec.map(|cs| Box::new(cs) as Box<_>);
+		let code_bytes = shared::genesis_state::get_code_bytes::<HostFunctions>(
+			&chain_spec,
+			&self.params.runtime,
 		)?;
 
 		let executor = WasmExecutor::<HostFunctions>::builder()
 			.with_allow_missing_host_functions(true)
 			.build();
 
-		let chain_type = self.identify_chain(&executor, &code_bytes, chain_spec.as_ref())?;
+		let chain_type = self.identify_chain(&executor, &code_bytes, para_id)?;
 
 		let client =
-			self.build_client_components(chain_spec.as_ref(), &code_bytes, executor, &chain_type)?;
+			self.build_client_components(chain_spec, &code_bytes, executor, &chain_type)?;
 
 		let inherent_data = create_inherent_data(&client, &chain_type);
 
@@ -481,7 +435,7 @@ impl OverheadCmd {
 
 	fn build_client_components(
 		&self,
-		chain_spec: Option<&GenericChainSpec<ParachainExtension, HostFunctions>>,
+		chain_spec: Option<Box<dyn ChainSpec>>,
 		code_bytes: &Vec<u8>,
 		executor: WasmExecutor<HostFunctions>,
 		chain_type: &ChainType,
@@ -498,7 +452,20 @@ impl OverheadCmd {
 			},
 		})?;
 
-		let storage = self.storage(&code_bytes, chain_spec, &chain_type)?;
+		//let storage = self.storage(&code_bytes, chain_spec, &chain_type)?;
+		let chain_type_for_closure = chain_type.clone();
+		let num_accounts = self.params.account_num;
+		let account_type = self.params.generate_accounts.clone();
+		let storage = shared::genesis_state::genesis_storage::<HostFunctions>(
+			self.params.genesis_builder,
+			&self.params.runtime,
+			Some(&code_bytes),
+			&self.params.genesis_builder_preset,
+			&chain_spec,
+			Some(Box::new(move |val| {
+				patch_balances(val, num_accounts, chain_type_for_closure.clone(), account_type.clone())
+			}))
+		)?;
 		let genesis_block_builder = GenesisBlockBuilder::new_with_storage(
 			storage,
 			true,
@@ -631,6 +598,7 @@ impl<'a> BasicCodeFetcher<'a> {
 	}
 }
 
+#[derive(Clone)]
 enum ChainType {
 	Parachain(u32),
 	Relaychain,

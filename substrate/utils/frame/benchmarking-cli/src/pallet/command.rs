@@ -21,7 +21,7 @@ use super::{
 };
 use crate::{
 	pallet::types::FetchedCode,
-	shared::{genesis_state::genesis_storage, GenesisBuilderPolicy},
+	shared::{genesis_state::{genesis_storage, get_code_bytes}, GenesisBuilderPolicy},
 };
 use codec::{Decode, Encode};
 use frame_benchmarking::{
@@ -44,7 +44,7 @@ use sp_core::{
 };
 use sp_externalities::Extensions;
 use sp_keystore::{testing::MemoryKeystore, KeystoreExt};
-use sp_runtime::traits::Hash;
+use sp_runtime::traits::{CheckedConversion, Hash};
 use sp_state_machine::StateMachine;
 use sp_storage::{well_known_keys::CODE, Storage};
 use sp_trie::{proof_size_extension::ProofSizeExt, recorder::Recorder};
@@ -56,6 +56,8 @@ use std::{
 	str::FromStr,
 	time,
 };
+use std::any::TypeId;
+use crate::overhead::cmd::ParachainExtension;
 
 /// Logging target
 const LOG_TARGET: &'static str = "polkadot_sdk_frame::benchmark::pallet";
@@ -201,11 +203,14 @@ impl PalletCmd {
 			return self.output_from_results(&batches)
 		}
 
+		let code_bytes = get_code_bytes::<ExtraHostFunctions>(&chain_spec, &self.runtime)?;
 		let genesis_storage = genesis_storage::<ExtraHostFunctions>(
 			self.genesis_builder,
 			&self.runtime,
+			Some(&code_bytes),
 			&self.genesis_builder_preset,
 			&chain_spec,
+			None
 		)?;
 
 		let cache_size = Some(self.database_cache_size as usize);

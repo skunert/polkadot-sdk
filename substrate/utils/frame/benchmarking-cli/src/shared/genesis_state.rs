@@ -9,6 +9,7 @@ use sc_cli::Result;
 use sp_storage::{well_known_keys::CODE, Storage};
 use sp_wasm_interface::HostFunctions;
 use std::{fs, path::PathBuf};
+use serde_json::Value;
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,8 +39,8 @@ point `--runtime` to your runtime blob and set `--genesis-builder=runtime`. This
 become a hard error any time after December 2024.";
 
 pub fn get_code_bytes<F: HostFunctions>(
-	chain_spec: Option<&GenericChainSpec<crate::overhead::cmd::ParachainExtension, F>>,
-	runtime: Option<&PathBuf>,
+	chain_spec: &Option<Box<dyn ChainSpec>>,
+	runtime: &Option<PathBuf>,
 ) -> Result<Vec<u8>> {
 	match (chain_spec, runtime) {
 		(None, Some(runtime_code_path)) => {
@@ -66,9 +67,10 @@ pub fn get_code_bytes<F: HostFunctions>(
 pub fn genesis_storage<F: HostFunctions>(
 	genesis_builder: Option<GenesisBuilderPolicy>,
 	runtime: &Option<PathBuf>,
-	maybe_code: Option<&Vec<u8>>,
+	code_bytes: Option<&Vec<u8>>,
 	genesis_builder_preset: &String,
 	chain_spec: &Option<Box<dyn ChainSpec>>,
+	storage_patcher: Option<Box<dyn Fn(Value) -> Value + 'static>>
 ) -> Result<Storage> {
 	Ok(match (genesis_builder, runtime) {
         (Some(GenesisBuilderPolicy::None), Some(_)) => return Err("Cannot use `--genesis-builder=none` with `--runtime` since the runtime would be ignored.".into()),
@@ -90,25 +92,19 @@ pub fn genesis_storage<F: HostFunctions>(
         (Some(GenesisBuilderPolicy::SpecRuntime), Some(_)) =>
             return Err("Cannot use `--genesis-builder=spec` with `--runtime` since the runtime would be ignored.".into()),
         (Some(GenesisBuilderPolicy::SpecRuntime), None) => {
-            let Some(chain_spec) = chain_spec else {
-                return Err("No chain spec specified to generate the genesis state".into());
-            };
+			let Some(code) = code_bytes else {
+				return Err("Can not build genesis from runtime. Please provide a runtime.".into());
+			};
 
-            genesis_from_spec_runtime::<F>(chain_spec.as_ref(), genesis_builder_preset)?
+			genesis_from_code::<F>(code.as_slice(), genesis_builder_preset)?
         },
         (Some(GenesisBuilderPolicy::Runtime), None) => return Err("Cannot use `--genesis-builder=runtime` without `--runtime`".into()),
-        (Some(GenesisBuilderPolicy::Runtime), Some(runtime)) | (None, Some(runtime)) => {
-            log::info!("Loading WASM from {}", runtime.display());
+        (Some(GenesisBuilderPolicy::Runtime), Some(_)) | (None, Some(_)) => {
+            let Some(code) = code_bytes else {
+				return Err("Can not build genesis from runtime. Please provide a runtime.".into());
+			};
 
-            let code = fs::read(runtime).map_err(|e| {
-                format!(
-                    "Could not load runtime file from path: {}, error: {}",
-                    runtime.display(),
-                    e
-                )
-            })?;
-
-            genesis_from_code::<F>(&code, genesis_builder_preset)?
+            genesis_from_code::<F>(code.as_slice(), genesis_builder_preset)?
         }
     })
 }
