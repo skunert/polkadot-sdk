@@ -38,7 +38,6 @@ use fake_runtime_api::RuntimeApi as FakeRuntimeApi;
 use frame_support::Deserialize;
 use log::info;
 use polkadot_parachain_primitives::primitives::Id as ParaId;
-use polkadot_primitives::v8::PersistedValidationData;
 use sc_block_builder::BlockBuilderApi;
 use sc_chain_spec::{ChainSpec, ChainSpecExtension, GenericChainSpec, GenesisBlockBuilder};
 use sc_cli::{CliConfiguration, ImportParams, Result, SharedParams};
@@ -59,6 +58,7 @@ use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
 use sp_state_machine::BasicExternalities;
 use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc};
+use sp_wasm_interface::HostFunctions;
 use subxt::ext::futures;
 use subxt_signer::{eth::Keypair as EthKeypair, DeriveJunction};
 
@@ -162,12 +162,12 @@ pub mod opaque {
 	pub type Block = generic::Block<Header, OpaqueExtrinsic>;
 }
 
-pub type HostFunctions = (
+pub type ParachainHostFunctions = (
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 	sp_io::SubstrateHostFunctions,
 );
 
-pub type OverheadClient = TFullClient<opaque::Block, FakeRuntimeApi, WasmExecutor<HostFunctions>>;
+pub type OverheadClient<Block, HF> = TFullClient<Block, FakeRuntimeApi, WasmExecutor<HF>>;
 
 /// Creates inherent data for a given parachain ID.
 ///
@@ -222,23 +222,22 @@ pub struct ParachainExtension {
 }
 
 fn generate_balances_sr25519(num_accounts: u64) -> Vec<Value> {
-	let mut accounts = Vec::new();
-	let pair = subxt_signer::sr25519::dev::alice();
+	let alice_pair = subxt_signer::sr25519::dev::alice();
 	(0..num_accounts)
 		.into_iter()
 		.map(|path| {
-			let derived = pair.derive([DeriveJunction::hard(path.to_string())]).unwrap();
+			let derived = alice_pair.derive([DeriveJunction::hard(path.to_string())]);
 			json!((AccountId32::from(derived.public_key().0), 1u64 << 60,))
 		})
 		.collect()
 }
 
 fn generate_balances_ecdsa(num_accounts: u64) -> Vec<Value> {
-	let pair = subxt_signer::ecdsa::dev::alice();
+	let alice_pair = subxt_signer::ecdsa::dev::alice();
 	(0..num_accounts)
 		.into_iter()
 		.map(|path| {
-			let derived = pair.derive([DeriveJunction::hard(path.to_string())]).unwrap();
+			let derived = alice_pair.derive([DeriveJunction::hard(path.to_string())]).unwrap();
 			json!((
 				"0x".to_string() + &hex::encode(EthKeypair::from(derived).account_id()),
 				1u64 << 60,
@@ -289,8 +288,8 @@ fn patch_genesis(
 	input_value
 }
 
-fn fetch_latest_metadata_from_blob(
-	executor: &WasmExecutor<HostFunctions>,
+fn fetch_latest_metadata_from_blob<HF: HostFunctions>(
+	executor: &WasmExecutor<HF>,
 	code_bytes: &Vec<u8>,
 ) -> Result<OpaqueMetadata> {
 	let mut ext = BasicExternalities::default();
@@ -342,9 +341,9 @@ fn fetch_latest_metadata_from_blob(
 }
 
 impl OverheadCmd {
-	fn identify_chain(
+	fn identify_chain<HF: HostFunctions>(
 		&self,
-		executor: &WasmExecutor<HostFunctions>,
+		executor: &WasmExecutor<HF>,
 		code_bytes: &Vec<u8>,
 		para_id: Option<u32>,
 	) -> Result<ChainType> {
@@ -356,9 +355,9 @@ impl OverheadCmd {
 		let para_inherent_exists = metadata.pallet_by_name("ParaInherent").is_some();
 
 		log::info!("Identifying chain type based on metadata.");
-		log::debug!("{} ParachainSystem", if parachain_system_exists { "✅" } else { "❌" });
-		log::debug!("{} ParachainInfo", if parachain_info_exists { "✅" } else { "❌" });
-		log::debug!("{} ParaInherent", if para_inherent_exists { "✅" } else { "❌" });
+		log::info!("{} ParachainSystem", if parachain_system_exists { "✅" } else { "❌" });
+		log::info!("{} ParachainInfo", if parachain_info_exists { "✅" } else { "❌" });
+		log::info!("{} ParaInherent", if para_inherent_exists { "✅" } else { "❌" });
 
 		if parachain_system_exists && parachain_info_exists {
 			log::info!("Parachain Identified");
@@ -371,34 +370,34 @@ impl OverheadCmd {
 			Ok(Unknown)
 		}
 	}
-	fn chain_spec_from_path(&self) -> Result<(Option<Box<dyn ChainSpec>>, Option<u32>)> {
+	fn chain_spec_from_path<HF: HostFunctions>(&self) -> Result<(Option<Box<dyn ChainSpec>>, Option<u32>)> {
 		let chain_spec = self
 			.shared_params
 			.chain
 			.clone()
 			.map(|path| {
-				GenericChainSpec::<ParachainExtension, HostFunctions>::from_json_file(path.into())
+				GenericChainSpec::<ParachainExtension, HF>::from_json_file(path.into())
 					.map_err(|e| format!("Unable to load chain spec: {:?}", e))
 			})
 			.transpose()?;
 
 		let para_id_from_chain_spec =
-			chain_spec.as_ref().map(|spec| spec.extensions().para_id).flatten();
+			chain_spec.as_ref().and_then(|spec| spec.extensions().para_id);
 		Ok((chain_spec.map(|c| Box::new(c) as Box<_>), para_id_from_chain_spec))
 	}
 
 	/// Run the benchmark overhead command.
-	pub fn run_with_extrinsic_builder(
+	pub fn run_with_extrinsic_builder<Block: BlockT, ExtraHF: HostFunctions>(
 		&self,
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> Result<()> {
-		let (chain_spec, para_id_from_chain_spec) = self.chain_spec_from_path()?;
-		let code_bytes = shared::genesis_state::get_code_bytes::<HostFunctions>(
+		let (chain_spec, para_id_from_chain_spec) = self.chain_spec_from_path::<(ParachainHostFunctions, ExtraHF)>()?;
+		let code_bytes = shared::genesis_state::get_code_bytes(
 			&chain_spec,
 			&self.params.runtime,
 		)?;
 
-		let executor = WasmExecutor::<HostFunctions>::builder()
+		let executor = WasmExecutor::<(ParachainHostFunctions, ExtraHF)>::builder()
 			.with_allow_missing_host_functions(true)
 			.build();
 
@@ -421,25 +420,23 @@ impl OverheadCmd {
 				),
 			};
 
-		let digest_items = Default::default();
-
 		self.run(
 			"some_name".to_string(),
 			client,
 			inherent_data,
-			digest_items,
+			Default::default(),
 			&*ext_builder,
 			chain_type.requires_proof_recording(),
 		)
 	}
 
-	fn build_client_components(
+	fn build_client_components<Block: BlockT, HF: HostFunctions>(
 		&self,
 		chain_spec: Option<Box<dyn ChainSpec>>,
 		code_bytes: &Vec<u8>,
-		executor: WasmExecutor<HostFunctions>,
+		executor: WasmExecutor<HF>,
 		chain_type: &ChainType,
-	) -> Result<Arc<OverheadClient>> {
+	) -> Result<Arc<OverheadClient<Block, HF>>> {
 		let extensions = ExecutionExtensions::new(None, Arc::new(executor.clone()));
 
 		let backend = new_db_backend(DatabaseSettings {
@@ -456,7 +453,7 @@ impl OverheadCmd {
 		let chain_type_for_closure = chain_type.clone();
 		let num_accounts = self.params.num_accounts;
 		let account_type = self.params.generate_accounts.clone();
-		let storage = shared::genesis_state::genesis_storage::<HostFunctions>(
+		let storage = shared::genesis_state::genesis_storage::<HF>(
 			self.params.genesis_builder,
 			&self.params.runtime,
 			Some(&code_bytes),
@@ -478,7 +475,7 @@ impl OverheadCmd {
 		let task_manager = TaskManager::new(tokio_runtime.handle().clone(), None)
 			.map_err(|_| "Unable to build task manager")?;
 
-		let client: Arc<OverheadClient> = Arc::new(new_client(
+		let client: Arc<OverheadClient<Block, HF>> = Arc::new(new_client(
 			backend.clone(),
 			executor,
 			genesis_block_builder,

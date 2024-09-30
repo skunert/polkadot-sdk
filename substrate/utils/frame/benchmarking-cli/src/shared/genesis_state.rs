@@ -38,7 +38,7 @@ generate the genesis state is deprecated. Please remove the `--chain`/`--dev`/`-
 point `--runtime` to your runtime blob and set `--genesis-builder=runtime`. This warning may \
 become a hard error any time after December 2024.";
 
-pub fn get_code_bytes<F: HostFunctions>(
+pub fn get_code_bytes(
 	chain_spec: &Option<Box<dyn ChainSpec>>,
 	runtime: &Option<PathBuf>,
 ) -> Result<Vec<u8>> {

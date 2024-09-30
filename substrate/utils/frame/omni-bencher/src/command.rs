@@ -18,6 +18,7 @@
 use clap::Parser;
 use frame_benchmarking_cli::BenchmarkCmd;
 use sc_cli::Result;
+use sp_runtime::{generic, OpaqueExtrinsic};
 use sp_runtime::traits::BlakeTwo256;
 
 /// # Polkadot Omni Benchmarking CLI
@@ -122,6 +123,11 @@ type HostFunctions = (
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 );
 
+/// Block number
+pub type BlockNumber = u32;
+pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
+pub type Block = generic::Block<Header, OpaqueExtrinsic>;
+
 impl Command {
 	pub fn run(self) -> Result<()> {
 		match self.sub {
@@ -146,7 +152,7 @@ impl V1SubCommand {
 					pallet.run_with_spec::<BlakeTwo256, HostFunctions>(None)
 				},
 				BenchmarkCmd::Overhead(overhead_cmd) =>
-					overhead_cmd.run_with_extrinsic_builder(None),
+					overhead_cmd.run_with_extrinsic_builder::<Block, HostFunctions>(None),
 				_ =>
 					return Err(
 						"Only the `v1 benchmark pallet` command is currently supported".into()

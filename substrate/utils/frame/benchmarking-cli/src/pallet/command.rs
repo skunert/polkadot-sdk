@@ -58,6 +58,11 @@ use std::{
 /// Logging target
 const LOG_TARGET: &'static str = "polkadot_sdk_frame::benchmark::pallet";
 
+type SubstrateAndExtraHF<T> = (
+	sp_io::SubstrateHostFunctions,
+	frame_benchmarking::benchmarking::HostFunctions,
+	T,
+);
 /// How the PoV size of a storage item should be estimated.
 #[derive(clap::ValueEnum, Debug, Eq, PartialEq, Clone, Copy)]
 pub enum PovEstimationMode {
@@ -199,8 +204,8 @@ impl PalletCmd {
 			return self.output_from_results(&batches)
 		}
 
-		let code_bytes = get_code_bytes::<ExtraHostFunctions>(&chain_spec, &self.runtime)?;
-		let genesis_storage = genesis_storage::<ExtraHostFunctions>(
+		let code_bytes = get_code_bytes(&chain_spec, &self.runtime)?;
+		let genesis_storage = genesis_storage::<SubstrateAndExtraHF<ExtraHostFunctions>>(
 			self.genesis_builder,
 			&self.runtime,
 			Some(&code_bytes),
@@ -236,11 +241,7 @@ impl PalletCmd {
 		let runtime_code = runtime.code()?;
 		let alloc_strategy = self.alloc_strategy(runtime_code.heap_pages);
 
-		let executor = WasmExecutor::<(
-			sp_io::SubstrateHostFunctions,
-			frame_benchmarking::benchmarking::HostFunctions,
-			ExtraHostFunctions,
-		)>::builder()
+		let executor = WasmExecutor::<SubstrateAndExtraHF<ExtraHostFunctions>>::builder()
 		.with_execution_method(method)
 		.with_allow_missing_host_functions(self.allow_missing_host_functions)
 		.with_onchain_heap_alloc_strategy(alloc_strategy)
