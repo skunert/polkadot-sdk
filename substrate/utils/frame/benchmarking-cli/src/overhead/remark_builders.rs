@@ -1,54 +1,23 @@
 use crate::extrinsic::ExtrinsicBuilder;
-use codec::Decode;
+use codec::{Decode, Encode};
 use sc_client_api::UsageProvider;
+use sc_executor::WasmExecutor;
 use sp_api::{Core, Metadata, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
-use sp_core::{crypto::AccountId32, Pair, H256};
-use sp_runtime::{traits::Block as BlockT, MultiSignature, OpaqueExtrinsic};
-use std::sync::Arc;
+use sp_core::{
+	traits::{CallContext, CodeExecutor, FetchRuntimeCode, RuntimeCode},
+	OpaqueMetadata,
+};
+use sp_runtime::{traits::Block as BlockT, OpaqueExtrinsic};
+use sp_state_machine::BasicExternalities;
+use sp_wasm_interface::HostFunctions;
+use std::{borrow::Cow, sync::Arc};
 use subxt::{
-	client::RuntimeVersion,
-	config::{
-		substrate::{BlakeTwo256, SubstrateExtrinsicParamsBuilder, SubstrateHeader},
-		SubstrateExtrinsicParams,
-	},
-	tx::Signer,
-	utils::MultiAddress,
-	Config, OfflineClient,
+	client::RuntimeVersion, config::substrate::SubstrateExtrinsicParamsBuilder, Config,
+	OfflineClient, SubstrateConfig,
 };
 
-pub enum MultiAddressAccountIdConfig {}
-
-impl Config for MultiAddressAccountIdConfig {
-	type Hash = H256;
-	type AccountId = AccountId32;
-	type Address = MultiAddress<Self::AccountId, u32>;
-	type Signature = MultiSignature;
-	type Hasher = BlakeTwo256;
-	type Header = SubstrateHeader<u32, BlakeTwo256>;
-	type ExtrinsicParams = SubstrateExtrinsicParams<Self>;
-	type AssetId = u32;
-}
-
-pub struct MySigner(pub sp_core::sr25519::Pair);
-
-impl<C: Config<Hash = H256, AccountId = AccountId32, Signature = MultiSignature>> Signer<C>
-	for MySigner
-{
-	fn account_id(&self) -> C::AccountId {
-		self.0.public().0.into()
-	}
-
-	fn address(&self) -> C::Address {
-		C::Address::from(<MySigner as subxt::tx::Signer<C>>::account_id(self))
-	}
-
-	fn sign(&self, signer_payload: &[u8]) -> C::Signature {
-		self.0.sign(signer_payload).into()
-	}
-}
-
-pub type SubstrateRemarkBuilder = DynamicRemarkBuilder<MultiAddressAccountIdConfig>;
+pub type SubstrateRemarkBuilder = DynamicRemarkBuilder<SubstrateConfig>;
 
 pub struct DynamicRemarkBuilder<C: Config> {
 	offline_client: OfflineClient<C>,
@@ -93,15 +62,7 @@ impl<C: Config> DynamicRemarkBuilder<C> {
 	}
 }
 
-impl<
-		C: Config<
-			Hash = H256,
-			AccountId = AccountId32,
-			Signature = MultiSignature,
-			ExtrinsicParams = SubstrateExtrinsicParams<C>,
-		>,
-	> ExtrinsicBuilder for DynamicRemarkBuilder<C>
-{
+impl ExtrinsicBuilder for DynamicRemarkBuilder<SubstrateConfig> {
 	fn pallet(&self) -> &str {
 		"system"
 	}
@@ -111,10 +72,10 @@ impl<
 	}
 
 	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
-		let signer = MySigner(sp_keyring::Sr25519Keyring::Alice.pair());
+		let signer = subxt_signer::sr25519::dev::alice();
 		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![Vec::<u8>::new()]);
 
-		let params = SubstrateExtrinsicParamsBuilder::<C>::new().nonce(nonce.into()).build();
+		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce.into()).build();
 
 		// Default transaction parameters assume a nonce of 0.
 		let transaction = self
@@ -126,4 +87,72 @@ impl<
 
 		OpaqueExtrinsic::from_bytes(&mut encoded).map_err(|_| "Unable to construct OpaqueExtrinsic")
 	}
+}
+
+struct BasicCodeFetcher<'a>(Cow<'a, [u8]>);
+impl<'a> FetchRuntimeCode for BasicCodeFetcher<'a> {
+	fn fetch_runtime_code(&self) -> Option<Cow<'a, [u8]>> {
+		Some(self.0.clone())
+	}
+}
+impl<'a> BasicCodeFetcher<'a> {
+	pub fn runtime_code(&'a self) -> RuntimeCode<'a> {
+		RuntimeCode {
+			code_fetcher: self as &'a dyn FetchRuntimeCode,
+			heap_pages: None,
+			hash: sp_crypto_hashing::blake2_256(&self.0).to_vec(),
+		}
+	}
+}
+
+pub fn fetch_latest_metadata_from_blob<HF: HostFunctions>(
+	executor: &WasmExecutor<HF>,
+	code_bytes: &Vec<u8>,
+) -> sc_cli::Result<OpaqueMetadata> {
+	let mut ext = BasicExternalities::default();
+	let fetcher = BasicCodeFetcher(code_bytes.into());
+	let version_result = executor
+		.call(
+			&mut ext,
+			&fetcher.runtime_code(),
+			"Metadata_metadata_versions",
+			&[],
+			CallContext::Offchain,
+		)
+		.0;
+
+	let opaque_metadata: Option<OpaqueMetadata> = match version_result {
+		Ok(supported_versions) => {
+			let versions = Vec::<u32>::decode(&mut supported_versions.as_slice())
+				.map_err(|e| format!("Error {e}"))?;
+			let version_to_use = versions.last().ok_or("No versions available.")?;
+			let parameters = (*version_to_use).encode();
+			let encoded = executor
+				.call(
+					&mut ext,
+					&fetcher.runtime_code(),
+					"Metadata_metadata_at_version",
+					&parameters,
+					CallContext::Offchain,
+				)
+				.0
+				.map_err(|e| format!("Unable to fetch metadata from blob: {e}"))?;
+			Decode::decode(&mut encoded.as_slice())?
+		},
+		Err(_) => {
+			let encoded = executor
+				.call(
+					&mut ext,
+					&fetcher.runtime_code(),
+					"Metadata_metadata",
+					&[],
+					CallContext::Offchain,
+				)
+				.0
+				.map_err(|e| format!("Unable to fetch metadata from blob: {e}"))?;
+			Decode::decode(&mut encoded.as_slice())?
+		},
+	};
+
+	opaque_metadata.ok_or_else(|| "Metadata not found".into())
 }

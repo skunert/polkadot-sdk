@@ -49,16 +49,11 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use sp_api::{ApiExt, CallApiAt, Core, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
-use sp_core::{
-	crypto::AccountId32,
-	traits::{CallContext, CodeExecutor, FetchRuntimeCode, RuntimeCode},
-	OpaqueMetadata,
-};
+use sp_core::crypto::AccountId32;
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
-use sp_state_machine::BasicExternalities;
 use sp_wasm_interface::HostFunctions;
-use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc};
+use std::{fmt::Debug, path::PathBuf, sync::Arc};
 use subxt::{ext::futures, utils::H256, Metadata};
 use subxt_signer::{eth::Keypair as EthKeypair, DeriveJunction};
 
@@ -278,58 +273,6 @@ fn patch_genesis(
 	input_value
 }
 
-fn fetch_latest_metadata_from_blob<HF: HostFunctions>(
-	executor: &WasmExecutor<HF>,
-	code_bytes: &Vec<u8>,
-) -> Result<OpaqueMetadata> {
-	let mut ext = BasicExternalities::default();
-	let fetcher = BasicCodeFetcher(code_bytes.into());
-	let version_result = executor
-		.call(
-			&mut ext,
-			&fetcher.runtime_code(),
-			"Metadata_metadata_versions",
-			&[],
-			CallContext::Offchain,
-		)
-		.0;
-
-	let opaque_metadata: Option<OpaqueMetadata> = match version_result {
-		Ok(supported_versions) => {
-			let versions = Vec::<u32>::decode(&mut supported_versions.as_slice())
-				.map_err(|e| format!("Error {e}"))?;
-			let version_to_use = versions.last().ok_or("No versions available.")?;
-			let parameters = (*version_to_use).encode();
-			let encoded = executor
-				.call(
-					&mut ext,
-					&fetcher.runtime_code(),
-					"Metadata_metadata_at_version",
-					&parameters,
-					CallContext::Offchain,
-				)
-				.0
-				.map_err(|e| format!("Unable to fetch metadata from blob: {e}"))?;
-			Decode::decode(&mut encoded.as_slice())?
-		},
-		Err(_) => {
-			let encoded = executor
-				.call(
-					&mut ext,
-					&fetcher.runtime_code(),
-					"Metadata_metadata",
-					&[],
-					CallContext::Offchain,
-				)
-				.0
-				.map_err(|e| format!("Unable to fetch metadata from blob: {e}"))?;
-			Decode::decode(&mut encoded.as_slice())?
-		},
-	};
-
-	opaque_metadata.ok_or_else(|| "Metadata not found".into())
-}
-
 impl OverheadCmd {
 	fn identify_chain(&self, metadata: &Metadata, para_id: Option<u32>) -> Result<ChainType> {
 		let parachain_info_exists = metadata.pallet_by_name("ParachainInfo").is_some();
@@ -407,11 +350,7 @@ impl OverheadCmd {
 				spec_version: version.spec_version,
 				transaction_version: version.transaction_version,
 			};
-			Box::new(DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(
-				metadata,
-				genesis,
-				runtime_version,
-			))
+			Box::new(SubstrateRemarkBuilder::new(metadata, genesis, runtime_version))
 		});
 
 		self.run(
@@ -570,22 +509,6 @@ impl BenchmarkType {
 		match self {
 			Self::Extrinsic => "ExtrinsicBase",
 			Self::Block => "BlockExecution",
-		}
-	}
-}
-
-struct BasicCodeFetcher<'a>(Cow<'a, [u8]>);
-impl<'a> FetchRuntimeCode for BasicCodeFetcher<'a> {
-	fn fetch_runtime_code(&self) -> Option<Cow<'a, [u8]>> {
-		Some(self.0.clone())
-	}
-}
-impl<'a> BasicCodeFetcher<'a> {
-	pub fn runtime_code(&'a self) -> RuntimeCode<'a> {
-		RuntimeCode {
-			code_fetcher: self as &'a dyn FetchRuntimeCode,
-			heap_pages: None,
-			hash: sp_crypto_hashing::blake2_256(&self.0).to_vec(),
 		}
 	}
 }
