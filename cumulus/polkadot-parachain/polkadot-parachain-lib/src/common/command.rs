@@ -170,6 +170,6 @@ where
 		cmd: &OverheadCmd,
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> SyncCmdResult {
-		cmd.run_with_extrinsic_builder(ext_builder)
+		cmd.run_with_extrinsic_builder::<<Self as NodeSpec>::Block, ()>(ext_builder)
 	}
 }

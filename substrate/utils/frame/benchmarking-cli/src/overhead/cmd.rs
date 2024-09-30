@@ -57,8 +57,8 @@ use sp_core::{
 use sp_inherents::{InherentData, InherentDataProvider};
 use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
 use sp_state_machine::BasicExternalities;
-use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc};
 use sp_wasm_interface::HostFunctions;
+use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc};
 use subxt::ext::futures;
 use subxt_signer::{eth::Keypair as EthKeypair, DeriveJunction};
 
@@ -120,13 +120,14 @@ pub struct OverheadParams {
 	pub genesis_builder: Option<GenesisBuilderPolicy>,
 
 	#[arg(long)]
-	pub config_variant: Option<ConfigVariant>,
-
-	#[arg(long)]
 	pub generate_accounts: Option<AccountType>,
 
 	#[arg(long)]
 	pub num_accounts: Option<u64>,
+
+	/// Para Id to Benchmark
+	#[arg(long)]
+	pub para_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, clap::ValueEnum, Serialize)]
@@ -337,7 +338,7 @@ fn fetch_latest_metadata_from_blob<HF: HostFunctions>(
 		},
 	};
 
-	Ok(opaque_metadata.ok_or("Metadata not found")?)
+	opaque_metadata.ok_or_else(|| "Metadata not found".into())
 }
 
 impl OverheadCmd {
@@ -361,7 +362,7 @@ impl OverheadCmd {
 
 		if parachain_system_exists && parachain_info_exists {
 			log::info!("Parachain Identified");
-			Ok(Parachain(para_id.or(self.params.bench.para_id).unwrap_or(DEFAULT_PARA_ID)))
+			Ok(Parachain(para_id.or(self.params.para_id).unwrap_or(DEFAULT_PARA_ID)))
 		} else if para_inherent_exists {
 			log::info!("Relaychain Identified");
 			Ok(Relaychain)
@@ -370,7 +371,9 @@ impl OverheadCmd {
 			Ok(Unknown)
 		}
 	}
-	fn chain_spec_from_path<HF: HostFunctions>(&self) -> Result<(Option<Box<dyn ChainSpec>>, Option<u32>)> {
+	fn chain_spec_from_path<HF: HostFunctions>(
+		&self,
+	) -> Result<(Option<Box<dyn ChainSpec>>, Option<u32>)> {
 		let chain_spec = self
 			.shared_params
 			.chain
@@ -391,11 +394,9 @@ impl OverheadCmd {
 		&self,
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
 	) -> Result<()> {
-		let (chain_spec, para_id_from_chain_spec) = self.chain_spec_from_path::<(ParachainHostFunctions, ExtraHF)>()?;
-		let code_bytes = shared::genesis_state::get_code_bytes(
-			&chain_spec,
-			&self.params.runtime,
-		)?;
+		let (chain_spec, para_id_from_chain_spec) =
+			self.chain_spec_from_path::<(ParachainHostFunctions, ExtraHF)>()?;
+		let code_bytes = shared::genesis_state::get_code_bytes(&chain_spec, &self.params.runtime)?;
 
 		let executor = WasmExecutor::<(ParachainHostFunctions, ExtraHF)>::builder()
 			.with_allow_missing_host_functions(true)
@@ -408,17 +409,9 @@ impl OverheadCmd {
 
 		let inherent_data = create_inherent_data(&client, &chain_type);
 
-		let ext_builder: Box<dyn ExtrinsicBuilder> =
-			match (ext_builder, &self.params.config_variant) {
-				(Some(ext_builder), _) => ext_builder,
-				(None, Some(ConfigVariant::AddressIsAccountId)) =>
-					Box::new(DynamicRemarkBuilder::<AddressAccountIdConfig>::new(client.clone())),
-				(None, Some(ConfigVariant::Eth)) =>
-					Box::new(EthRemarkBuilder::<EthConfig>::new(client.clone())),
-				(None, Some(ConfigVariant::AddressIsMultiAddress)) | (None, None) => Box::new(
-					DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(client.clone()),
-				),
-			};
+		let ext_builder = ext_builder.unwrap_or_else(|| {
+			Box::new(DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(client.clone()))
+		});
 
 		self.run(
 			"some_name".to_string(),

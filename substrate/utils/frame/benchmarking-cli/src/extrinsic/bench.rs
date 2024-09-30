@@ -55,10 +55,6 @@ pub struct BenchmarkParams {
 	/// Only useful for debugging.
 	#[arg(long)]
 	pub max_ext_per_block: Option<u32>,
-
-	/// Para Id to Benchmark
-	#[arg(long)]
-	pub para_id: Option<u32>,
 }
 
 /// The results of multiple runs in nano seconds.

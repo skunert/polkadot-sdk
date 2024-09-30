@@ -15,12 +15,14 @@
 // along with Polkadot.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::cli::{Cli, Subcommand, NODE_VERSION};
-use frame_benchmarking_cli::{BenchmarkCmd, ExtrinsicFactory, SUBSTRATE_REFERENCE_HARDWARE};
+use frame_benchmarking_cli::{
+	BenchmarkCmd, ExtrinsicFactory, SubstrateRemarkBuilder, SUBSTRATE_REFERENCE_HARDWARE,
+};
 use futures::future::TryFutureExt;
 use log::info;
 use polkadot_service::{
 	self,
-	benchmarking::{benchmark_inherent_data, RemarkBuilder, TransferKeepAliveBuilder},
+	benchmarking::{benchmark_inherent_data, TransferKeepAliveBuilder},
 	HeaderBackend, IdentifyVariant,
 };
 use sc_cli::SubstrateCli;
@@ -413,8 +415,8 @@ pub fn run() -> Result<()> {
 					let header = client.header(client.info().genesis_hash).unwrap().unwrap();
 					let inherent_data = benchmark_inherent_data(header)
 						.map_err(|e| format!("generating inherent data: {:?}", e))?;
-					let remark_builder =
-						RemarkBuilder::new(client.clone(), config.chain_spec.identify_chain());
+
+					let remark_builder = SubstrateRemarkBuilder::new(client.clone());
 
 					let tka_builder = TransferKeepAliveBuilder::new(
 						client.clone(),
