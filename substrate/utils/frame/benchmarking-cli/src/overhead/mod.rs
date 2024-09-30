@@ -20,4 +20,4 @@ pub mod template;
 
 pub use cmd::OverheadCmd;
 mod fake_runtime_api;
-mod remark_builders;
+pub mod remark_builders;

@@ -48,6 +48,9 @@ pub struct RunConfig {
 	/// A custom runtime resolver.
 	pub runtime_resolver: Box<dyn RuntimeResolver>,
 	/// Extrinsic builder to use in benchmarks.
+	///
+	/// Some benchmarks attempt to build blocks. This extrinsic builder
+	/// is used to populate these blocks with extrinsics.
 	pub extrinsic_builder: Option<Box<dyn ExtrinsicBuilder>>,
 }
 

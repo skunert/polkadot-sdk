@@ -390,7 +390,7 @@ fn generate_host_function_implementation(
 		#(#cfg_attrs)*
 		registry.register_static(
 			#crate_::sp_wasm_interface::Function::name(&#struct_name),
-			|caller: #crate_::sp_wasm_interface::wasmtime::Caller<T::State>, #(#ffi_args_prototype),*|
+			|mut caller: #crate_::sp_wasm_interface::wasmtime::Caller<T::State>, #(#ffi_args_prototype),*|
 				-> std::result::Result<#ffi_return_ty, #crate_::sp_wasm_interface::anyhow::Error>
 			{
 				T::with_function_context(caller, move |__function_context__| {

@@ -16,13 +16,13 @@
 
 #![allow(missing_docs)]
 
+use cumulus_client_service::ParachainHostFunctions;
 use cumulus_primitives_core::ParaId;
 use cumulus_test_runtime::AccountId;
-use sc_chain_spec::{ChainSpecExtension, ChainSpecGroup};
+use sc_chain_spec::{ChainSpecExtension, ChainSpecGroup, GenesisConfigBuilderRuntimeCaller};
 use sc_service::ChainType;
 use serde::{Deserialize, Serialize};
-use sp_core::Pair;
-use sp_runtime::traits::IdentifyAccount;
+use serde_json::json;
 
 /// Specialized `ChainSpec` for the normal parachain runtime.
 pub type ChainSpec = sc_service::GenericChainSpec<Extensions>;
@@ -50,6 +50,31 @@ pub fn get_chain_spec_with_extra_endowed(
 	extra_endowed_accounts: Vec<AccountId>,
 	code: &[u8],
 ) -> ChainSpec {
+	let mut patch_json = json!({
+		"balances": {
+			"balances": extra_endowed_accounts.into_iter().map(|a| (a, 1u64 << 60)).collect::<Vec<_>>(),
+		}
+	});
+
+	if let Some(id) = id {
+		// Merge parachain ID if given, otherwise use the one from the preset.
+		sc_chain_spec::json_merge(
+			&mut patch_json,
+			json!({
+				"parachainInfo": {
+					"parachainId": id,
+				},
+			}),
+		);
+	};
+
+	let runtime_caller = GenesisConfigBuilderRuntimeCaller::<ParachainHostFunctions>::new(code);
+	let mut development_preset = runtime_caller
+		.get_named_preset(Some(&"development".to_string()))
+		.expect("development preset is available on test runtime; qed");
+
+	sc_chain_spec::json_merge(&mut development_preset, patch_json.into());
+
 	ChainSpec::builder(
 		code,
 		Extensions { para_id: id.unwrap_or(cumulus_test_runtime::PARACHAIN_ID.into()).into() },
@@ -57,7 +82,7 @@ pub fn get_chain_spec_with_extra_endowed(
 	.with_name("Local Testnet")
 	.with_id("local_testnet")
 	.with_chain_type(ChainType::Local)
-	.with_genesis_config_preset_name("development")
+	.with_genesis_config(development_preset)
 	.build()
 }
 

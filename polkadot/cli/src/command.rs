@@ -404,8 +404,9 @@ pub fn run() -> Result<()> {
 
 					cmd.run(client.clone()).map_err(Error::SubstrateCli)
 				}),
-				BenchmarkCmd::Overhead(cmd) =>
-					cmd.run_with_extrinsic_builder(None).map_err(Error::SubstrateCli),
+				BenchmarkCmd::Overhead(cmd) => cmd
+					.run_with_extrinsic_builder::<polkadot_service::Block, ()>(None)
+					.map_err(Error::SubstrateCli),
 				// These commands are very similar and can be handled in nearly the same way.
 				BenchmarkCmd::Extrinsic(cmd) => runner.sync_run(|mut config| {
 					let (client, _, _, _) = polkadot_service::new_chain_ops(&mut config, None)?;
