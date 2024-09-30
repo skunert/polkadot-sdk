@@ -18,13 +18,21 @@
 //! Has all the required runtime APIs implemented to satisfy trait bounds,
 //! but the methods are never called since we use WASM exclusively.
 
-use super::cmd::opaque::Block;
 use sp_core::OpaqueMetadata;
 use sp_runtime::{
-	traits::Block as BlockT,
+	generic,
+	traits::{BlakeTwo256, Block as BlockT},
 	transaction_validity::{TransactionSource, TransactionValidity},
-	ApplyExtrinsicResult,
+	ApplyExtrinsicResult, OpaqueExtrinsic,
 };
+
+/// Block number
+type BlockNumber = u32;
+/// Opaque block header type.
+type Header = generic::Header<BlockNumber, BlakeTwo256>;
+/// Opaque block type.
+type Block = generic::Block<Header, OpaqueExtrinsic>;
+
 #[allow(unused)]
 pub struct Runtime;
 

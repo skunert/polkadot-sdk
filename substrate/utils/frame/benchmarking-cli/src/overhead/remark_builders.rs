@@ -1,11 +1,10 @@
-use crate::{extrinsic::ExtrinsicBuilder, overhead::cmd::opaque};
+use crate::extrinsic::ExtrinsicBuilder;
 use codec::Decode;
-use frame_support::__private::sp_tracing::tracing;
 use sc_client_api::UsageProvider;
 use sp_api::{Core, Metadata, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::{crypto::AccountId32, Pair, H256};
-use sp_runtime::{MultiSignature, OpaqueExtrinsic};
+use sp_runtime::{traits::Block as BlockT, MultiSignature, OpaqueExtrinsic};
 use std::sync::Arc;
 use subxt::{
 	client::RuntimeVersion,
@@ -51,38 +50,46 @@ impl<C: Config<Hash = H256, AccountId = AccountId32, Signature = MultiSignature>
 
 pub type SubstrateRemarkBuilder = DynamicRemarkBuilder<MultiAddressAccountIdConfig>;
 
-pub struct DynamicRemarkBuilder<C: Config<Hash = H256>> {
+pub struct DynamicRemarkBuilder<C: Config> {
 	offline_client: OfflineClient<C>,
 }
 
-impl<C: Config<Hash = H256>> DynamicRemarkBuilder<C> {
-	pub fn new<Client>(client: Arc<Client>) -> Self
+impl<C: Config> DynamicRemarkBuilder<C> {
+	pub fn new_from_client<Client, Block>(client: Arc<Client>) -> sc_cli::Result<Self>
 	where
-		Client: UsageProvider<opaque::Block> + HeaderBackend<opaque::Block>,
-		Client: ProvideRuntimeApi<opaque::Block>,
-		Client::Api: Metadata<opaque::Block> + Core<opaque::Block>,
+		Block: BlockT<Hash = C::Hash>,
+		Client: UsageProvider<Block> + HeaderBackend<Block>,
+		Client: ProvideRuntimeApi<Block>,
+		Client::Api: Metadata<Block> + Core<Block>,
 	{
 		let genesis = client.usage_info().chain.best_hash;
 		let api = client.runtime_api();
 		let mut supported_metadata_versions = api.metadata_versions(genesis).unwrap();
-		let Some(latest) = supported_metadata_versions.pop() else {
-			panic!("No metadata version is supported");
-		};
-		let Some(metadata) = api.metadata_at_version(genesis, latest).unwrap() else {
-			panic!("Unable to fetch metadata");
-		};
+		let latest = supported_metadata_versions
+			.pop()
+			.ok_or("No runtime version supported".to_string())?;
 		let version = api.version(genesis).unwrap();
 		let runtime_version = RuntimeVersion {
 			spec_version: version.spec_version,
 			transaction_version: version.transaction_version,
 		};
-		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())
-			.map_err(|e| tracing::error!("Error {e}"))
-			.unwrap();
+		let metadata = api
+			.metadata_at_version(genesis, latest)
+			.map_err(|e| format!("Unable to fetch metadata: {:?}", e))?
+			.ok_or("Unable to decode metadata".to_string())?;
+		let metadata = subxt::Metadata::decode(&mut (*metadata).as_slice())?;
 
-		let offline_client: OfflineClient<C> =
-			OfflineClient::new(genesis, runtime_version, metadata);
-		Self { offline_client }
+		Ok(Self { offline_client: OfflineClient::new(genesis, runtime_version, metadata) })
+	}
+}
+
+impl<C: Config> DynamicRemarkBuilder<C> {
+	pub fn new(
+		metadata: subxt::Metadata,
+		genesis_hash: C::Hash,
+		runtime_version: RuntimeVersion,
+	) -> Self {
+		Self { offline_client: OfflineClient::new(genesis_hash, runtime_version, metadata) }
 	}
 }
 
@@ -104,8 +111,8 @@ impl<
 	}
 
 	fn build(&self, nonce: u32) -> std::result::Result<OpaqueExtrinsic, &'static str> {
-		let signer = MySigner(sp_keyring::Sr25519Keyring::Bob.pair());
-		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![vec!['a', 'b', 'b']]);
+		let signer = MySigner(sp_keyring::Sr25519Keyring::Alice.pair());
+		let dynamic_tx = subxt::dynamic::tx("System", "remark", vec![Vec::<u8>::new()]);
 
 		let params = SubstrateExtrinsicParamsBuilder::<C>::new().nonce(nonce.into()).build();
 

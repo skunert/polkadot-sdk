@@ -47,7 +47,7 @@ use sc_executor::WasmExecutor;
 use sc_service::{new_client, new_db_backend, BasePath, ClientConfig, TFullClient, TaskManager};
 use serde::Serialize;
 use serde_json::{json, Value};
-use sp_api::{ApiExt, CallApiAt, ProvideRuntimeApi};
+use sp_api::{ApiExt, CallApiAt, Core, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::{
 	crypto::AccountId32,
@@ -59,7 +59,7 @@ use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
 use sp_state_machine::BasicExternalities;
 use sp_wasm_interface::HostFunctions;
 use std::{borrow::Cow, fmt::Debug, path::PathBuf, sync::Arc};
-use subxt::ext::futures;
+use subxt::{ext::futures, utils::H256, Metadata};
 use subxt_signer::{eth::Keypair as EthKeypair, DeriveJunction};
 
 const DEFAULT_PARA_ID: u32 = 100;
@@ -150,17 +150,6 @@ pub(crate) enum BenchmarkType {
 	Extrinsic,
 	/// Measure the per-block execution overhead.
 	Block,
-}
-
-pub mod opaque {
-	use sp_runtime::{generic, traits::BlakeTwo256, OpaqueExtrinsic};
-
-	/// Block number
-	pub type BlockNumber = u32;
-	/// Opaque block header type.
-	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
-	/// Opaque block type.
-	pub type Block = generic::Block<Header, OpaqueExtrinsic>;
 }
 
 pub type ParachainHostFunctions = (
@@ -342,15 +331,7 @@ fn fetch_latest_metadata_from_blob<HF: HostFunctions>(
 }
 
 impl OverheadCmd {
-	fn identify_chain<HF: HostFunctions>(
-		&self,
-		executor: &WasmExecutor<HF>,
-		code_bytes: &Vec<u8>,
-		para_id: Option<u32>,
-	) -> Result<ChainType> {
-		let opaque_metadata = fetch_latest_metadata_from_blob(executor, code_bytes)?;
-		let metadata = subxt::Metadata::decode(&mut (*opaque_metadata).as_slice())?;
-
+	fn identify_chain(&self, metadata: &Metadata, para_id: Option<u32>) -> Result<ChainType> {
 		let parachain_info_exists = metadata.pallet_by_name("ParachainInfo").is_some();
 		let parachain_system_exists = metadata.pallet_by_name("ParachainSystem").is_some();
 		let para_inherent_exists = metadata.pallet_by_name("ParaInherent").is_some();
@@ -390,10 +371,14 @@ impl OverheadCmd {
 	}
 
 	/// Run the benchmark overhead command.
-	pub fn run_with_extrinsic_builder<Block: BlockT, ExtraHF: HostFunctions>(
+	pub fn run_with_extrinsic_builder<Block, ExtraHF>(
 		&self,
 		ext_builder: Option<Box<dyn ExtrinsicBuilder>>,
-	) -> Result<()> {
+	) -> Result<()>
+	where
+		Block: BlockT<Extrinsic = OpaqueExtrinsic, Hash = H256>,
+		ExtraHF: HostFunctions,
+	{
 		let (chain_spec, para_id_from_chain_spec) =
 			self.chain_spec_from_path::<(ParachainHostFunctions, ExtraHF)>()?;
 		let code_bytes = shared::genesis_state::get_code_bytes(&chain_spec, &self.params.runtime)?;
@@ -402,19 +387,35 @@ impl OverheadCmd {
 			.with_allow_missing_host_functions(true)
 			.build();
 
-		let chain_type = self.identify_chain(&executor, &code_bytes, para_id_from_chain_spec)?;
+		let opaque_metadata = fetch_latest_metadata_from_blob(&executor, &code_bytes)?;
+		let metadata = Metadata::decode(&mut (*opaque_metadata).as_slice())?;
+		let chain_type = self.identify_chain(&metadata, para_id_from_chain_spec)?;
 
-		let client =
-			self.build_client_components(chain_spec, &code_bytes, executor, &chain_type)?;
+		let client = self.build_client_components::<Block, (ParachainHostFunctions, ExtraHF)>(
+			chain_spec,
+			&code_bytes,
+			executor,
+			&chain_type,
+		)?;
 
 		let inherent_data = create_inherent_data(&client, &chain_type);
 
 		let ext_builder = ext_builder.unwrap_or_else(|| {
-			Box::new(DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(client.clone()))
+			let genesis = client.usage_info().chain.best_hash;
+			let version = client.runtime_api().version(genesis).unwrap();
+			let runtime_version = subxt::client::RuntimeVersion {
+				spec_version: version.spec_version,
+				transaction_version: version.transaction_version,
+			};
+			Box::new(DynamicRemarkBuilder::<MultiAddressAccountIdConfig>::new(
+				metadata,
+				genesis,
+				runtime_version,
+			))
 		});
 
 		self.run(
-			"some_name".to_string(),
+			"Overhead Benchmark".to_string(),
 			client,
 			inherent_data,
 			Default::default(),

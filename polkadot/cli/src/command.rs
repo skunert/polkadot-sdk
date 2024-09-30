@@ -416,7 +416,7 @@ pub fn run() -> Result<()> {
 					let inherent_data = benchmark_inherent_data(header)
 						.map_err(|e| format!("generating inherent data: {:?}", e))?;
 
-					let remark_builder = SubstrateRemarkBuilder::new(client.clone());
+					let remark_builder = SubstrateRemarkBuilder::new_from_client(client.clone())?;
 
 					let tka_builder = TransferKeepAliveBuilder::new(
 						client.clone(),
