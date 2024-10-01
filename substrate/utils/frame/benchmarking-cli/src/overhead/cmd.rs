@@ -51,7 +51,11 @@ use sp_api::{ApiExt, CallApiAt, Core, ProvideRuntimeApi};
 use sp_blockchain::HeaderBackend;
 use sp_core::crypto::AccountId32;
 use sp_inherents::{InherentData, InherentDataProvider};
-use sp_runtime::{traits::Block as BlockT, DigestItem, OpaqueExtrinsic};
+use sp_runtime::{
+	generic,
+	traits::{BlakeTwo256, Block as BlockT},
+	DigestItem, OpaqueExtrinsic,
+};
 use sp_wasm_interface::HostFunctions;
 use std::{fmt::Debug, path::PathBuf, sync::Arc};
 use subxt::{ext::futures, utils::H256, Metadata};
@@ -151,6 +155,10 @@ pub type ParachainHostFunctions = (
 	cumulus_primitives_proof_size_hostfunction::storage_proof_size::HostFunctions,
 	sp_io::SubstrateHostFunctions,
 );
+
+pub type BlockNumber = u32;
+pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
+pub type OpaqueBlock = generic::Block<Header, OpaqueExtrinsic>;
 
 pub type OverheadClient<Block, HF> = TFullClient<Block, FakeRuntimeApi, WasmExecutor<HF>>;
 

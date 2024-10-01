@@ -3,7 +3,6 @@ use codec::{Decode, Encode};
 use sc_client_api::UsageProvider;
 use sc_executor::WasmExecutor;
 use sp_api::{Core, Metadata, ProvideRuntimeApi};
-use sp_blockchain::HeaderBackend;
 use sp_core::{
 	traits::{CallContext, CodeExecutor, FetchRuntimeCode, RuntimeCode},
 	OpaqueMetadata,
@@ -27,8 +26,7 @@ impl<C: Config> DynamicRemarkBuilder<C> {
 	pub fn new_from_client<Client, Block>(client: Arc<Client>) -> sc_cli::Result<Self>
 	where
 		Block: BlockT<Hash = C::Hash>,
-		Client: UsageProvider<Block> + HeaderBackend<Block>,
-		Client: ProvideRuntimeApi<Block>,
+		Client: UsageProvider<Block> + ProvideRuntimeApi<Block>,
 		Client::Api: Metadata<Block> + Core<Block>,
 	{
 		let genesis = client.usage_info().chain.best_hash;
