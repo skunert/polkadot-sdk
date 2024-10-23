@@ -29,7 +29,11 @@ use crate::{
 		fake_runtime_api,
 		template::TemplateData,
 	},
-	shared::{self, GenesisBuilderPolicy, HostInfoParams, WeightParams},
+	shared::{
+		self, genesis_state,
+		genesis_state::{GenesisSource, GenesisStateHandler},
+		GenesisBuilderPolicy, HostInfoParams, WeightParams,
+	},
 };
 use clap::{Args, Parser};
 use codec::Encode;
@@ -59,6 +63,7 @@ use sp_runtime::{
 use sp_wasm_interface::HostFunctions;
 use std::{
 	fmt::{Debug, Display, Formatter},
+	fs,
 	path::PathBuf,
 	sync::Arc,
 };
@@ -264,22 +269,70 @@ pub struct ParachainExtension {
 }
 
 impl OverheadCmd {
-	fn chain_spec_from_path<HF: HostFunctions>(
+	fn state_handler_from_cli<HF: HostFunctions>(
 		&self,
-	) -> Result<(Option<Box<dyn ChainSpec>>, Option<u32>)> {
-		let chain_spec = self
-			.shared_params
-			.chain
-			.clone()
-			.map(|path| {
-				GenericChainSpec::<ParachainExtension, HF>::from_json_file(path.into())
-					.map_err(|e| format!("Unable to load chain spec: {:?}", e))
-			})
-			.transpose()?;
+		chain_spec_from_api: Option<Box<dyn ChainSpec>>,
+	) -> Result<GenesisStateHandler> {
+		let genesis_builder_to_source = || match self.params.genesis_builder {
+			Some(GenesisBuilderPolicy::Runtime | GenesisBuilderPolicy::SpecRuntime) =>
+				GenesisSource::Runtime,
+			Some(
+				GenesisBuilderPolicy::Spec |
+				GenesisBuilderPolicy::SpecGenesis |
+				GenesisBuilderPolicy::None,
+			) |
+			None => GenesisSource::Raw,
+		};
 
-		let para_id_from_chain_spec =
-			chain_spec.as_ref().and_then(|spec| spec.extensions().para_id);
-		Ok((chain_spec.map(|c| Box::new(c) as Box<_>), para_id_from_chain_spec))
+		// First handle chain-spec related cases.
+		match (chain_spec_from_api, &self.shared_params.chain) {
+			(Some(chain_spec), _) => {
+				log::debug!(
+					"Initializing state handler with chain-spec from API: {:?}",
+					chain_spec
+				);
+
+				let source = genesis_builder_to_source();
+
+				return Ok(GenesisStateHandler::from_chain_spec(
+					chain_spec,
+					source,
+					self.params.para_id,
+				));
+			},
+			(_, Some(chain_spec_path)) => {
+				log::debug!(
+					"Initializing state handler with chain-spec from path: {:?}",
+					chain_spec_path
+				);
+				let (chain_spec, para_id_from_chain_spec) =
+					genesis_state::chain_spec_from_path::<HF>(chain_spec_path.to_string().into())?;
+
+				let source = genesis_builder_to_source();
+
+				return Ok(GenesisStateHandler::from_chain_spec(
+					chain_spec,
+					source,
+					self.params.para_id.or(para_id_from_chain_spec),
+				))
+			},
+			(_, _) => {},
+		};
+
+		// Check for runtimes. In general, we make sure that `--runtime` and `--chain` are
+		// incompatible on the CLI level.
+		if let Some(runtime_path) = &self.params.runtime {
+			log::debug!("Initializing state handler with runtime from path: {:?}", runtime_path);
+
+			let runtime_blob = fs::read(runtime_path)?;
+			return Ok(GenesisStateHandler::Runtime(
+				runtime_blob,
+				self.params.genesis_builder_preset.clone(),
+				self.params.para_id,
+			))
+		};
+
+		Err("Neither a runtime nor a chain-spec were specified".to_string().into())
 	}
 
 	/// Run the benchmark overhead command.
@@ -294,11 +347,7 @@ impl OverheadCmd {
 		Block: BlockT<Extrinsic = OpaqueExtrinsic, Hash = H256>,
 		ExtraHF: HostFunctions,
 	{
-		let (chain_spec, para_id_from_chain_spec) = match chain_spec {
-			Some(_) => (chain_spec, None),
-			None => self.chain_spec_from_path::<(ParachainHostFunctions, ExtraHF)>()?,
-		};
-
+		let state_handler = self.state_handler_from_cli(chain_spec)?;
 		let code_bytes = shared::genesis_state::get_code_bytes(&chain_spec, &self.params.runtime)?;
 
 		let executor = WasmExecutor::<(ParachainHostFunctions, ExtraHF)>::builder()

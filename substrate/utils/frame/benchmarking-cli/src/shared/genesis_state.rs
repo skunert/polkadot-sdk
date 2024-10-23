@@ -3,14 +3,16 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::shared::GenesisBuilderPolicy;
-use sc_chain_spec::{ChainSpec, GenesisConfigBuilderRuntimeCaller};
+use crate::{overhead::cmd::ParachainExtension, shared::GenesisBuilderPolicy};
+use sc_chain_spec::{ChainSpec, GenericChainSpec, GenesisConfigBuilderRuntimeCaller};
 use sc_cli::Result;
 use serde_json::Value;
 use sp_storage::{well_known_keys::CODE, Storage};
 use sp_wasm_interface::HostFunctions;
-use std::{fs, path::PathBuf};
-
+use std::{
+	fs,
+	path::{Path, PathBuf},
+};
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -38,6 +40,43 @@ const WARN_SPEC_GENESIS_CTOR: &'static str = "Using the chain spec instead of th
 generate the genesis state is deprecated. Please remove the `--chain`/`--dev`/`--local` argument, \
 point `--runtime` to your runtime blob and set `--genesis-builder=runtime`. This warning may \
 become a hard error any time after December 2024.";
+
+pub enum GenesisSource {
+	Runtime,
+	Raw,
+	None,
+}
+
+pub enum GenesisStateHandler {
+	ChainSpec(Box<dyn ChainSpec>, GenesisSource, Option<u32>),
+	Runtime(Vec<u8>, String, Option<u32>),
+}
+
+impl GenesisStateHandler {
+	pub fn from_chain_spec(
+		chain_spec: Box<dyn ChainSpec>,
+		source: GenesisSource,
+		para_id: Option<u32>,
+	) -> Self {
+		GenesisStateHandler::ChainSpec(chain_spec, source, para_id)
+	}
+	pub fn para_id(&self) -> Option<u32> {
+		match self {
+			GenesisStateHandler::ChainSpec(_, _, para_id) => *para_id,
+			GenesisStateHandler::Runtime(_, _, para_id) => *para_id,
+		}
+	}
+}
+
+pub fn chain_spec_from_path<HF: HostFunctions>(
+	chain: PathBuf,
+) -> Result<(Box<dyn ChainSpec>, Option<u32>)> {
+	let spec = GenericChainSpec::<ParachainExtension, HF>::from_json_file(chain)
+		.map_err(|e| format!("Unable to load chain spec: {:?}", e))?;
+
+	let para_id_from_chain_spec = spec.extensions().para_id;
+	Ok((Box::new(spec), para_id_from_chain_spec))
+}
 
 pub fn get_code_bytes(
 	chain_spec: &Option<Box<dyn ChainSpec>>,
