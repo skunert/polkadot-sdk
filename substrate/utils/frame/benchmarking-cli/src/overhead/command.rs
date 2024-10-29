@@ -185,7 +185,7 @@ pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
 pub type OpaqueBlock = generic::Block<Header, OpaqueExtrinsic>;
 
 /// Client type used throughout the benchmarking code.
-type OverheadClient<Block, RA, HF> = TFullClient<Block, RA, WasmExecutor<HF>>;
+type OverheadClient<Block, HF> = TFullClient<Block, FakeRuntimeApi, WasmExecutor<HF>>;
 
 /// Creates inherent data for a given parachain ID.
 ///
@@ -409,7 +409,7 @@ impl OverheadCmd {
 		};
 
 		let client = self
-			.build_client_components::<Block, FakeRuntimeApi, (ParachainHostFunctions, ExtraHF)>(
+			.build_client_components::<Block, (ParachainHostFunctions, ExtraHF)>(
 				state_handler
 					.build_storage::<(ParachainHostFunctions, ExtraHF)>(genesis_patcher)?,
 				executor,
@@ -457,12 +457,12 @@ impl OverheadCmd {
 		)
 	}
 
-	fn build_client_components<Block, RA, HF>(
+	fn build_client_components<Block, HF>(
 		&self,
 		genesis_storage: Storage,
 		executor: WasmExecutor<HF>,
 		chain_type: &ChainType,
-	) -> Result<Arc<OverheadClient<Block, RA, HF>>>
+	) -> Result<Arc<OverheadClient<Block, HF>>>
 	where
 		Block: BlockT,
 		HF: HostFunctions,
@@ -498,7 +498,7 @@ impl OverheadCmd {
 		let task_manager = TaskManager::new(tokio_runtime.handle().clone(), None)
 			.map_err(|_| "Unable to build task manager")?;
 
-		let client: Arc<OverheadClient<Block, RA, HF>> = Arc::new(new_client(
+		let client: Arc<OverheadClient<Block, HF>> = Arc::new(new_client(
 			backend.clone(),
 			executor,
 			genesis_block_builder,
