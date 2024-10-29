@@ -350,6 +350,10 @@ impl OverheadCmd {
 		Ok(())
 	}
 
+	/// Run the overhead benchmark with the default extrinsic builder.
+	///
+	/// This will use [SubstrateRemarkBuilder] to build the extrinsic. It is
+	/// designed to match common configurations found in substrate chains.
 	pub fn run_with_default_builder_and_spec<Block, ExtraHF>(
 		&self,
 		chain_spec: Option<Box<dyn ChainSpec>>,
@@ -368,6 +372,10 @@ impl OverheadCmd {
 	}
 
 	/// Run the benchmark overhead command.
+	///
+	/// The provided [ExtrinsicBuilder] will be used to build extrinsics for
+	/// block-building. It is expected that the provided implementation builds
+	/// a `System::remark` extrinsic.
 	pub fn run_with_extrinsic_builder_and_spec<
 		Block,
 		ExtraHF
