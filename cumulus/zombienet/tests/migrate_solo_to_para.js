@@ -1,26 +1,17 @@
 const assert = require("assert");
-const polkadotApi = require("@polkadot/api");
-const utilCrypto = require("@polkadot/util-crypto");
 const fs = require("fs").promises;
-
-async function connect(apiUrl, types) {
-    const provider = new polkadotApi.WsProvider(apiUrl);
-    const api = new polkadotApi.ApiPromise({ provider, types });
-    await api.isReady;
-    return api;
-}
 
 async function run(nodeName, networkInfo, args) {
     const [paraNode, partialPath, soloNode ] = args;
     const {wsUri, userDefinedTypes} = networkInfo.nodesByName[paraNode];
     const {wsUri: wsUri_solo, userDefinedTypes: userDefinedTypes_solo } = networkInfo.nodesByName[soloNode];
-    const para = await connect(wsUri, userDefinedTypes);
-    const solo = await connect(wsUri_solo, userDefinedTypes_solo);
+    const para = await zombie.connect(wsUri, userDefinedTypes);
+    const solo = await zombie.connect(wsUri_solo, userDefinedTypes_solo);
 
-    await utilCrypto.cryptoWaitReady();
+    await zombie.util.cryptoWaitReady();
 
-    // account to submit tx
-    const keyring = new polkadotApi.Keyring({ type: "sr25519" });
+    // Submit transaction with Alice account
+    const keyring = new zombie.Keyring({ type: "sr25519" });
     const alice = keyring.addFromUri("//Alice");
 
     // get genesis to update
