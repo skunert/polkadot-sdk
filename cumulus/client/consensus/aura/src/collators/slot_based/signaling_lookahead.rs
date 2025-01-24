@@ -229,7 +229,7 @@ where
 				slot_claim,
 				parent_header,
 				authoring_duration,
-				core_index: core_index.clone(),
+				core_index,
 				relay_parent_header: relay_parent_header.clone(),
 				max_pov_size,
 			};

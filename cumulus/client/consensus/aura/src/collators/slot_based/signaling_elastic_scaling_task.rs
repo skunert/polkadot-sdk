@@ -190,7 +190,7 @@ where
 
 			// Retrieve the core selector.
 			let (core_selector, claim_queue_offset) =
-				match core_selector(&*para_client, parent.hash, *parent.header.number()) {
+				match core_selector(&para_client, parent.hash, *parent.header.number()) {
 					Ok(core_selector) => core_selector,
 					Err(err) => {
 						tracing::trace!(
@@ -297,7 +297,7 @@ where
 				slot_claim,
 				parent_header,
 				authoring_duration,
-				core_index: core_index.clone(),
+				core_index: *core_index,
 				relay_parent_header: relay_parent_header.clone(),
 				max_pov_size: *max_pov_size,
 			};
