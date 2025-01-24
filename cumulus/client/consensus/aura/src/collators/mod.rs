@@ -40,7 +40,6 @@ use sp_keystore::KeystorePtr;
 use sp_timestamp::Timestamp;
 
 pub mod basic;
-pub mod lookahead;
 pub mod slot_based;
 
 // This is an arbitrary value which is likely guaranteed to exceed any reasonable
