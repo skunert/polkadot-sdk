@@ -352,6 +352,7 @@ where
 
 	let client = params.client.clone();
 	let backend = params.backend.clone();
+
 	let (block_import, slot_based_handle) = if use_slot_based_collator {
 		(params.other.0, Some(params.other.1))
 	} else {
@@ -502,7 +503,6 @@ where
 				authoring_duration: Duration::from_millis(2000),
 				reinitialize: false,
 				slot_drift: Duration::from_secs(1),
-				// TODO skunert fix this, not needed for lookahead collator
 				block_import_handle: slot_based_handle,
 				spawner: task_manager.spawn_handle(),
 				flavor: use_slot_based_collator

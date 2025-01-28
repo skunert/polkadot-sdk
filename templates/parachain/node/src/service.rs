@@ -17,7 +17,6 @@ use cumulus_client_collator::service::CollatorService;
 //TODO skunert update docs
 #[docify::export(lookahead_collator)]
 #[allow(unused_imports)]
-use cumulus_client_consensus_aura::collators::lookahead::{self as aura, Params as AuraParams};
 use cumulus_client_consensus_common::ParachainBlockImport as TParachainBlockImport;
 use cumulus_client_consensus_proposer::Proposer;
 use cumulus_client_service::{
