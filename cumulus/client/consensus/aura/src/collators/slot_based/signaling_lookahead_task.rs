@@ -20,9 +20,9 @@ use cumulus_primitives_aura::AuraUnincludedSegmentApi;
 use cumulus_primitives_core::GetCoreSelectorApi;
 use cumulus_relay_chain_interface::RelayChainInterface;
 
-use polkadot_primitives::{Id as ParaId, OccupiedCoreAssumption};
+use polkadot_primitives::{CoreIndex, Header as RelayHeader, Id as ParaId, OccupiedCoreAssumption};
 
-use crate::{collators::slot_based::SignalingTaskMessage, LOG_TARGET};
+use crate::{collator::SlotClaim, collators::slot_based::SignalingTaskMessage, LOG_TARGET};
 use cumulus_client_collator::service::ServiceInterface as CollatorServiceInterface;
 use futures::prelude::*;
 use polkadot_primitives::vstaging::{ClaimQueueOffset, DEFAULT_CLAIM_QUEUE_OFFSET};
@@ -57,6 +57,100 @@ pub struct SignalingTaskParams<Block: BlockT, Client, Backend, RelayClient, Pub,
 	pub relay_slot_duration: Duration,
 }
 
+async fn handle_new_relay_parent<Block, P, Client, CS, RelayClient>(
+	relay_parent_header: RelayHeader,
+	para_id: ParaId,
+	relay_client: RelayClient,
+	para_client: &Client,
+	para_backend: &Arc<impl sc_client_api::Backend<Block>>,
+	keystore: &KeystorePtr,
+	collator_service: &CS,
+	relay_slot_duration: Duration,
+) -> Option<(SlotClaim<P::Public>, Block::Header, CoreIndex, RelayHeader, u32)>
+where
+	Block: BlockT,
+	Client: ProvideRuntimeApi<Block>
+		+ UsageProvider<Block>
+		+ HeaderBackend<Block>
+		+ BlockBackend<Block>
+		+ Send
+		+ Sync
+		+ 'static,
+	Client::Api:
+		AuraApi<Block, P::Public> + GetCoreSelectorApi<Block> + AuraUnincludedSegmentApi<Block>,
+	RelayClient: RelayChainInterface + Clone + 'static,
+	CS: CollatorServiceInterface<Block> + Send + Sync + 'static,
+	P: Pair,
+	P::Public: AppPublic + Member + Codec,
+	P::Signature: TryFrom<Vec<u8>> + Member + Codec,
+{
+	let relay_parent_hash = relay_parent_header.hash();
+	tracing::debug!(target: crate::LOG_TARGET, ?relay_parent_hash, "Observed new relay parent in signaling task.");
+
+	let core_index = crate::collators::cores_scheduled_for_para(
+		relay_parent_hash,
+		para_id,
+		&relay_client,
+		ClaimQueueOffset(DEFAULT_CLAIM_QUEUE_OFFSET),
+	)
+	.await
+	.get(0)
+	.copied()?;
+
+	let pvd = relay_client
+		.persisted_validation_data(relay_parent_hash, para_id, OccupiedCoreAssumption::Included)
+		.await
+		.ok()??;
+	let max_pov_size = pvd.max_pov_size;
+
+	let (included_block, parent) =
+		crate::collators::find_parent(relay_parent_hash, para_id, &**para_backend, &relay_client)
+			.await?;
+
+	let (relay_slot, timestamp) = cumulus_client_consensus_common::relay_slot_and_timestamp(
+		&relay_parent_header,
+		relay_slot_duration,
+	)?;
+
+	let parent_hash = parent.hash;
+	let parent_header = parent.header;
+
+	let slot_duration =
+		sc_consensus_aura::standalone::slot_duration_at(&*para_client, parent_hash).ok()?;
+
+	let slot_now = Slot::from_timestamp(timestamp, slot_duration);
+
+	tracing::debug!(
+		target: crate::LOG_TARGET,
+		?core_index,
+		slot_info = ?slot_now,
+		?timestamp,
+		unincluded_segment_len = parent.depth,
+		relay_parent = %relay_parent_hash,
+		included = %included_block,
+		parent = %parent_hash,
+		"Building block."
+	);
+
+	let slot_claim = crate::collators::can_build_upon::<_, _, P>(
+		slot_now,
+		relay_slot,
+		timestamp,
+		parent_hash,
+		included_block,
+		&*para_client,
+		&keystore,
+	)
+	.await?;
+
+	// Do not try to build upon an unknown, pruned or bad block
+	if !collator_service.check_block_status(parent_hash, &parent_header) {
+		return None;
+	}
+
+	Some((slot_claim, parent_header, core_index, relay_parent_header, max_pov_size))
+}
+
 /// Run block-builder.
 pub fn run_signaling_task<Block, P, Client, CS, Backend, RelayClient>(
 	params: SignalingTaskParams<Block, Client, Backend, RelayClient, P::Public, CS>,
@@ -81,19 +175,9 @@ where
 {
 	async move {
 		tracing::info!(target: LOG_TARGET, "Starting lookahead slot-based block-builder task.");
-		let SignalingTaskParams {
-			relay_client,
-			para_client,
-			keystore,
-			para_id,
-			authoring_duration,
-			para_backend,
-			building_task_sender,
-			collator_service,
-			relay_slot_duration,
-		} = params;
 
-		let mut import_notifications = match relay_client.import_notification_stream().await {
+		let mut import_notifications = match params.relay_client.import_notification_stream().await
+		{
 			Ok(s) => s,
 			Err(err) => {
 				tracing::error!(
@@ -101,139 +185,37 @@ where
 					?err,
 					"Failed to initialize consensus: no relay chain import notification stream"
 				);
-
-				return
+				return;
 			},
 		};
 
 		while let Some(relay_parent_header) = import_notifications.next().await {
-			let Ok(relay_parent) = relay_client.best_block_hash().await else {
-				tracing::warn!(target: crate::LOG_TARGET, "Unable to fetch latest relay chain block hash.");
-				continue
-			};
-			tracing::debug!(target: crate::LOG_TARGET, ?relay_parent, "Observed new relay parent in signaling task.");
-
-			let core_index = if let Some(core_index) = crate::collators::cores_scheduled_for_para(
-				relay_parent,
-				params.para_id,
-				&relay_client,
-				ClaimQueueOffset(DEFAULT_CLAIM_QUEUE_OFFSET),
-			)
-			.await
-			.get(0)
-			{
-				*core_index
-			} else {
-				tracing::trace!(
-					target: crate::LOG_TARGET,
-					?relay_parent,
-					?para_id,
-					"Para is not scheduled on any core, skipping import notification",
-				);
-
-				continue
-			};
-
-			let max_pov_size = match relay_client
-				.persisted_validation_data(relay_parent, para_id, OccupiedCoreAssumption::Included)
-				.await
-			{
-				Ok(None) => continue,
-				Ok(Some(pvd)) => pvd.max_pov_size,
-				Err(err) => {
-					tracing::error!(target: crate::LOG_TARGET, ?err, "Failed to gather information from relay-client");
-					continue
-				},
-			};
-
-			let (included_block, parent) = match crate::collators::find_parent(
-				relay_parent,
-				para_id,
-				&*para_backend,
-				&relay_client,
-			)
-			.await
-			{
-				Some(value) => value,
-				None => continue,
-			};
-
-			let Some((relay_slot, timestamp)) =
-				cumulus_client_consensus_common::relay_slot_and_timestamp(
-					&relay_parent_header,
-					relay_slot_duration,
+			let Some((slot_claim, parent_header, core_index, relay_parent_header, max_pov_size)) =
+				handle_new_relay_parent::<Block, P, Client, CS, RelayClient>(
+					relay_parent_header,
+					params.para_id,
+					params.relay_client.clone(),
+					&params.para_client,
+					&params.para_backend,
+					&params.keystore,
+					&params.collator_service,
+					params.relay_slot_duration,
 				)
+				.await
 			else {
 				continue;
 			};
 
-			// Build in a loop until not allowed. Note that the authorities can change
-			// at any block, so we need to re-claim our slot every time.
-			let parent_hash = parent.hash;
-			let parent_header = parent.header;
-
-			let slot_duration =
-				match sc_consensus_aura::standalone::slot_duration_at(&*para_client, parent_hash) {
-					Ok(sd) => sd,
-					Err(err) => {
-						tracing::error!(target: crate::LOG_TARGET, ?err, "Failed to acquire parachain slot duration");
-						continue
-					},
-				};
-
-			let slot_now = Slot::from_timestamp(timestamp, slot_duration);
-
-			tracing::debug!(
-				target: crate::LOG_TARGET,
-				?core_index,
-				slot_info = ?slot_now,
-				?timestamp,
-				unincluded_segment_len = parent.depth,
-				relay_parent = %relay_parent,
-				included = %included_block,
-				parent = %parent_hash,
-				"Building block."
-			);
-
-			let Some(slot_claim) = crate::collators::can_build_upon::<_, _, P>(
-				slot_now,
-				relay_slot,
-				timestamp,
-				parent_hash,
-				included_block,
-				&*para_client,
-				&keystore,
-			)
-			.await
-			else {
-				tracing::debug!(
-					target: crate::LOG_TARGET,
-					?core_index,
-					slot_info = ?slot_now,
-					unincluded_segment_len = parent.depth,
-					relay_parent = %relay_parent,
-					included = %included_block,
-					parent = %parent_hash,
-					"Unable to build."
-				);
-				continue
-			};
-
-			// Do not try to build upon an unknown, pruned or bad block
-			if !collator_service.check_block_status(parent_hash, &parent_header) {
-				continue
-			}
-
 			let build_signal = SignalingTaskMessage {
 				slot_claim,
 				parent_header,
-				authoring_duration,
+				authoring_duration: params.authoring_duration,
 				core_index,
 				relay_parent_header: relay_parent_header.clone(),
 				max_pov_size,
 			};
 
-			let _ = building_task_sender.unbounded_send(build_signal).inspect_err(|e| {
+			let _ = params.building_task_sender.unbounded_send(build_signal).inspect_err(|e| {
 				tracing::error!(
 					target: crate::LOG_TARGET,
 					%e,
