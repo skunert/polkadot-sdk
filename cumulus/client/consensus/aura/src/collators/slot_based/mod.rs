@@ -62,8 +62,8 @@ mod block_import;
 mod collation_task;
 mod relay_chain_data_cache;
 
-mod signaling_elastic_scaling_task;
-mod signaling_lookahead;
+mod signaling_lookahead_task;
+mod signaling_time_based_task;
 
 pub struct SignalingTaskMessage<Pub, Block: BlockT> {
 	pub slot_claim: SlotClaim<Pub>,
@@ -203,7 +203,7 @@ pub fn run<Block, P, BI, CIDP, Client, Backend, RClient, CHP, Proposer, CS, Spaw
 
 	let signaling_fut = match flavor {
 		Flavor::TimeBased => {
-			let signaling_task_params = signaling_elastic_scaling_task::SignalingTaskParams {
+			let signaling_task_params = signaling_time_based_task::SignalingTaskParams {
 				para_client,
 				para_backend,
 				relay_client,
@@ -215,13 +215,13 @@ pub fn run<Block, P, BI, CIDP, Client, Backend, RClient, CHP, Proposer, CS, Spaw
 				collator_service,
 			};
 
-			signaling_elastic_scaling_task::run_signaling_task::<Block, P, _, _, _, _>(
+			signaling_time_based_task::run_signaling_task::<Block, P, _, _, _, _>(
 				signaling_task_params,
 			)
 			.boxed()
 		},
 		Flavor::Lookahead => {
-			let signaling_task_params = signaling_lookahead::SignalingTaskParams {
+			let signaling_task_params = signaling_lookahead_task::SignalingTaskParams {
 				para_client,
 				para_backend,
 				relay_client,
@@ -233,8 +233,10 @@ pub fn run<Block, P, BI, CIDP, Client, Backend, RClient, CHP, Proposer, CS, Spaw
 				relay_slot_duration,
 			};
 
-			signaling_lookahead::run_signaling_task::<Block, P, _, _, _, _>(signaling_task_params)
-				.boxed()
+			signaling_lookahead_task::run_signaling_task::<Block, P, _, _, _, _>(
+				signaling_task_params,
+			)
+			.boxed()
 		},
 	};
 	spawner.spawn_blocking(

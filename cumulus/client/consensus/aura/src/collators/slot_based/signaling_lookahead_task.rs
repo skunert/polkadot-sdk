@@ -158,8 +158,6 @@ where
 				None => continue,
 			};
 
-			let para_client = &*para_client;
-			let keystore = &keystore;
 			let Some((relay_slot, timestamp)) =
 				cumulus_client_consensus_common::relay_slot_and_timestamp(
 					&relay_parent_header,
@@ -184,6 +182,7 @@ where
 				};
 
 			let slot_now = Slot::from_timestamp(timestamp, slot_duration);
+
 			tracing::debug!(
 				target: crate::LOG_TARGET,
 				?core_index,
@@ -202,7 +201,7 @@ where
 				timestamp,
 				parent_hash,
 				included_block,
-				para_client,
+				&*para_client,
 				&keystore,
 			)
 			.await
@@ -215,7 +214,7 @@ where
 					relay_parent = %relay_parent,
 					included = %included_block,
 					parent = %parent_hash,
-					"Not building block."
+					"Unable to build."
 				);
 				continue
 			};
@@ -233,6 +232,7 @@ where
 				relay_parent_header: relay_parent_header.clone(),
 				max_pov_size,
 			};
+
 			let _ = building_task_sender.unbounded_send(build_signal).inspect_err(|e| {
 				tracing::error!(
 					target: crate::LOG_TARGET,
