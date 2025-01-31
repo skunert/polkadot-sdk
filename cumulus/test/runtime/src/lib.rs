@@ -37,6 +37,11 @@ pub mod elastic_scaling {
 	include!(concat!(env!("OUT_DIR"), "/wasm_binary_elastic_scaling.rs"));
 }
 
+pub mod elastic_scaling_single_slot {
+	#[cfg(feature = "std")]
+	include!(concat!(env!("OUT_DIR"), "/wasm_binary_elastic_scaling_single_slot.rs"));
+}
+
 mod genesis_config_presets;
 mod test_pallet;
 
@@ -98,20 +103,23 @@ impl_opaque_keys! {
 /// The para-id used in this runtime.
 pub const PARACHAIN_ID: u32 = 100;
 
-#[cfg(not(feature = "elastic-scaling"))]
+#[cfg(not(any(feature = "elastic-scaling", feature = "elastic-scaling-single-slot")))]
 const UNINCLUDED_SEGMENT_CAPACITY: u32 = 4;
-#[cfg(not(feature = "elastic-scaling"))]
+#[cfg(not(any(feature = "elastic-scaling", feature = "elastic-scaling-single-slot")))]
 const BLOCK_PROCESSING_VELOCITY: u32 = 1;
 
-#[cfg(feature = "elastic-scaling")]
+#[cfg(any(feature = "elastic-scaling", feature = "elastic-scaling-single-slot"))]
 const UNINCLUDED_SEGMENT_CAPACITY: u32 = 7;
-#[cfg(feature = "elastic-scaling")]
+#[cfg(any(feature = "elastic-scaling", feature = "elastic-scaling-single-slot"))]
 const BLOCK_PROCESSING_VELOCITY: u32 = 4;
 
-#[cfg(not(feature = "elastic-scaling"))]
+#[cfg(not(any(feature = "elastic-scaling", feature = "elastic-scaling-single-slot")))]
 pub const MILLISECS_PER_BLOCK: u64 = 6000;
 #[cfg(feature = "elastic-scaling")]
 pub const MILLISECS_PER_BLOCK: u64 = 2000;
+
+#[cfg(feature = "elastic-scaling-single-slot")]
+pub const MILLISECS_PER_BLOCK: u64 = 6000;
 
 pub const SLOT_DURATION: u64 = MILLISECS_PER_BLOCK;
 
@@ -236,8 +244,17 @@ impl cumulus_pallet_weight_reclaim::Config for Runtime {
 	type WeightInfo = ();
 }
 
+#[cfg(not(feature = "elastic-scaling-single-slot"))]
 parameter_types! {
 	pub const MinimumPeriod: u64 = SLOT_DURATION / 2;
+}
+
+#[cfg(feature = "elastic-scaling-single-slot")]
+parameter_types! {
+	pub const MinimumPeriod: u64 = SLOT_DURATION / 6;
+}
+
+parameter_types! {
 	pub const PotId: PalletId = PalletId(*b"PotStake");
 	pub const SessionLength: BlockNumber = 10 * MINUTES;
 	pub const Offset: u32 = 0;

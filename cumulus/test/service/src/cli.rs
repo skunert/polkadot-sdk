@@ -274,6 +274,12 @@ impl SubstrateCli for TestCollatorCli {
 					2200,
 				)))) as Box<_>
 			},
+			"elastic-scaling-single-slot" => {
+				tracing::info!("Using elastic-scaling single-slot chain spec.");
+				Box::new(cumulus_test_service::get_elastic_scaling_single_slot_chain_spec(Some(
+					ParaId::from(2300),
+				))) as Box<_>
+			},
 			path => {
 				let chain_spec =
 					cumulus_test_service::chain_spec::ChainSpec::from_json_file(path.into())?;

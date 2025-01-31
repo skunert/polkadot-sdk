@@ -33,6 +33,7 @@ use crate::{
 use cumulus_client_collator::service::ServiceInterface as CollatorServiceInterface;
 use futures::prelude::*;
 use sc_client_api::{BlockBackend, UsageProvider};
+use sc_consensus_aura::SlotDuration;
 use sp_api::ProvideRuntimeApi;
 use sp_application_crypto::AppPublic;
 use sp_blockchain::HeaderBackend;
@@ -42,6 +43,7 @@ use sp_keystore::KeystorePtr;
 use sp_runtime::traits::{Block as BlockT, Header as HeaderT, Member};
 use sp_timestamp::Timestamp;
 use std::{sync::Arc, time::Duration};
+use tracing::log;
 
 /// Parameters for [`run_block_builder`].
 pub struct SignalingTaskParams<Block: BlockT, Client, Backend, RelayClient, Pub, CS> {
@@ -79,6 +81,7 @@ struct SlotInfo {
 struct SlotTimer<Block, Client, P> {
 	client: Arc<Client>,
 	drift: Duration,
+	block_production_interval: Option<Duration>,
 	_marker: std::marker::PhantomData<(Block, Box<dyn Fn(P) + Send + Sync + 'static>)>,
 }
 
@@ -92,12 +95,12 @@ fn duration_now() -> Duration {
 }
 
 /// Returns the duration until the next slot from now.
-fn time_until_next_slot(slot_duration: Duration, drift: Duration) -> Duration {
+fn time_until_next_slot(slot_duration: Duration, drift: Duration) -> (Duration, Slot) {
 	let now = duration_now().as_millis() - drift.as_millis();
 
 	let next_slot = (now + slot_duration.as_millis()) / slot_duration.as_millis();
 	let remaining_millis = next_slot * slot_duration.as_millis() - now;
-	Duration::from_millis(remaining_millis as u64)
+	(Duration::from_millis(remaining_millis as u64), Slot::from(next_slot as u64))
 }
 
 impl<Block, Client, P> SlotTimer<Block, Client, P>
@@ -109,8 +112,12 @@ where
 	P::Public: AppPublic + Member + Codec,
 	P::Signature: TryFrom<Vec<u8>> + Member + Codec,
 {
-	pub fn new_with_drift(client: Arc<Client>, drift: Duration) -> Self {
-		Self { client, drift, _marker: Default::default() }
+	pub fn new_with_drift(
+		client: Arc<Client>,
+		drift: Duration,
+		block_production_interval: Option<Duration>,
+	) -> Self {
+		Self { client, drift, block_production_interval, _marker: Default::default() }
 	}
 
 	/// Returns a future that resolves when the next slot arrives.
@@ -120,10 +127,28 @@ where
 			return Err(())
 		};
 
-		let time_until_next_slot = time_until_next_slot(slot_duration.as_duration(), self.drift);
+		let (time_until_next_slot, next_slot) = time_until_next_slot(
+			self.block_production_interval.unwrap_or_else(|| slot_duration.as_duration()),
+			self.drift,
+		);
 		tokio::time::sleep(time_until_next_slot).await;
-		let timestamp = sp_timestamp::Timestamp::current();
-		Ok(SlotInfo { slot: Slot::from_timestamp(timestamp, slot_duration), timestamp })
+		let timestamp = sp_timestamp::Timestamp::from(
+			*next_slot *
+				self.block_production_interval
+					.unwrap_or_else(|| slot_duration.as_duration())
+					.as_millis() as u64,
+		);
+		let aura_slot = Slot::from_timestamp(timestamp, slot_duration);
+		let timestamp = sp_timestamp::Timestamp::from(
+			*aura_slot * slot_duration.as_duration().as_millis() as u64,
+		);
+		log::info!(
+			"Emitting from slot timer: next tick: {:?}, timestamp: {:?}, aura_slot: {:?}",
+			next_slot,
+			timestamp,
+			aura_slot
+		);
+		Ok(SlotInfo { slot: aura_slot, timestamp })
 	}
 }
 
@@ -163,7 +188,11 @@ where
 			collator_service,
 		} = params;
 
-		let slot_timer = SlotTimer::<_, _, P>::new_with_drift(para_client.clone(), slot_drift);
+		let slot_timer = SlotTimer::<_, _, P>::new_with_drift(
+			para_client.clone(),
+			slot_drift,
+			Some(Duration::from_secs(2)),
+		);
 
 		let mut relay_chain_data_cache = RelayChainDataCache::new(relay_client.clone(), para_id);
 
@@ -287,6 +316,7 @@ where
 				target: crate::LOG_TARGET,
 				?core_index,
 				slot_info = ?para_slot,
+				timestamp = ?slot_claim.timestamp(),
 				unincluded_segment_len = parent.depth,
 				relay_parent = %relay_parent,
 				included = %included_block,

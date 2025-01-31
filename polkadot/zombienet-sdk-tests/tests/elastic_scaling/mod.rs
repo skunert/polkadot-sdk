@@ -4,3 +4,5 @@
 mod basic_3cores;
 mod doesnt_break_parachains;
 mod slot_based_3cores;
+
+mod slot_based_3cores_single_slot;

@@ -20,7 +20,7 @@ use subxt_signer::sr25519::dev;
 use zombienet_sdk::NetworkConfigBuilder;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn slot_based_3cores_single_slot_test() -> Result<(), anyhow::Error> {
+async fn slot_based_3cores_test() -> Result<(), anyhow::Error> {
 	let _ = env_logger::try_init_from_env(
 		env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
 	);
@@ -56,30 +56,17 @@ async fn slot_based_3cores_single_slot_test() -> Result<(), anyhow::Error> {
 				.fold(r, |acc, i| acc.with_node(|node| node.with_name(&format!("validator-{i}"))))
 		})
 		.with_parachain(|p| {
-			// Para 2100 uses the old elastic scaling mvp, which doesn't send the new UMP signal
-			// commitment for selecting the core index.
-			p.with_id(2100)
-				.with_default_command("test-parachain")
-				.with_default_image(images.cumulus.as_str())
-				.with_chain("elastic-scaling-mvp")
-				.with_default_args(vec![
-					("--experimental-use-slot-based").into(),
-					("-lparachain=debug,aura=debug").into(),
-				])
-				.with_collator(|n| n.with_name("collator-elastic-mvp"))
-		})
-		.with_parachain(|p| {
 			// Para 2200 uses the new RFC103-enabled collator which sends the UMP signal commitment
 			// for selecting the core index
 			p.with_id(2200)
 				.with_default_command("test-parachain")
 				.with_default_image(images.cumulus.as_str())
-				.with_chain("elastic-scaling")
+				.with_chain("elastic-scaling-single-slot")
 				.with_default_args(vec![
 					("--experimental-use-slot-based").into(),
 					("-lparachain=debug,aura=debug").into(),
 				])
-				.with_collator(|n| n.with_name("collator-elastic"))
+				.with_collator(|n| n.with_name("single-slot"))
 		})
 		.with_global_settings(|global_settings| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
 			Ok(val) => global_settings.with_base_dir(val),
@@ -95,7 +82,7 @@ async fn slot_based_3cores_single_slot_test() -> Result<(), anyhow::Error> {
 	let network = spawn_fn(config).await?;
 
 	let relay_node = network.get_node("validator-0")?;
-	let para_node_elastic = network.get_node("collator-elastic")?;
+	let para_node_elastic = network.get_node("single-slot")?;
 	let para_node_elastic_mvp = network.get_node("collator-elastic-mvp")?;
 
 	let relay_client: OnlineClient<PolkadotConfig> = relay_node.wait_client().await?;

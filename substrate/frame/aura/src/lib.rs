@@ -397,12 +397,13 @@ impl<T: Config> OnTimestampSet<T::Moment> for Pallet<T> {
 		let timestamp_slot = moment / slot_duration;
 		let timestamp_slot = Slot::from(timestamp_slot.saturated_into::<u64>());
 
+		let timestamp: u64 = moment.saturated_into::<u64>();
 		assert_eq!(
 			CurrentSlot::<T>::get(),
 			timestamp_slot,
 			"Timestamp slot must match `CurrentSlot`. This likely means that the configured block \
 			time in the node and/or rest of the runtime is not compatible with Aura's \
-			`SlotDuration`",
+			`SlotDuration`., {timestamp}",
 		);
 	}
 }
