@@ -126,7 +126,7 @@ where
 			tracing::error!(target: crate::LOG_TARGET, "Failed to fetch slot duration from runtime.");
 			return Err(())
 		};
-
+		tracing::info!(target: LOG_TARGET, "Slot duration: {slot_duration:?}");
 		let (time_until_next_slot, next_slot) = time_until_next_slot(
 			self.block_production_interval.unwrap_or_else(|| slot_duration.as_duration()),
 			self.drift,
@@ -142,11 +142,12 @@ where
 		let timestamp = sp_timestamp::Timestamp::from(
 			*aura_slot * slot_duration.as_duration().as_millis() as u64,
 		);
-		log::info!(
-			"Emitting from slot timer: next tick: {:?}, timestamp: {:?}, aura_slot: {:?}",
-			next_slot,
-			timestamp,
-			aura_slot
+		tracing::info!(
+			?slot_duration,
+			?next_slot,
+			?timestamp,
+			?aura_slot,
+			"Emitting from slot timer"
 		);
 		Ok(SlotInfo { slot: aura_slot, timestamp })
 	}

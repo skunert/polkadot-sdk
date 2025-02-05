@@ -10,6 +10,8 @@ collator-single-core: is up
 # configure relay chain
 alice: js-script ./assign-core.js with "2100,0" return is 0 within 600 seconds
 alice: js-script ./assign-core.js with "2100,1" return is 0 within 600 seconds
+alice: js-script ./assign-core.js with "2300,0" return is 0 within 600 seconds
+alice: js-script ./assign-core.js with "2300,1" return is 0 within 600 seconds
 
 collator-single-core: reports block height is at least 20 within 225 seconds
 collator-elastic: reports block height is at least 40 within 225 seconds

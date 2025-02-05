@@ -83,7 +83,6 @@ async fn slot_based_3cores_test() -> Result<(), anyhow::Error> {
 
 	let relay_node = network.get_node("validator-0")?;
 	let para_node_elastic = network.get_node("single-slot")?;
-	let para_node_elastic_mvp = network.get_node("collator-elastic-mvp")?;
 
 	let relay_client: OnlineClient<PolkadotConfig> = relay_node.wait_client().await?;
 	let alice = dev::alice();
@@ -156,7 +155,6 @@ async fn slot_based_3cores_test() -> Result<(), anyhow::Error> {
 	// Assert the parachain finalized block height is also on par with the number of backed
 	// candidates.
 	assert_finalized_block_height(&para_node_elastic.wait_client().await?, 36..46).await?;
-	assert_finalized_block_height(&para_node_elastic_mvp.wait_client().await?, 36..46).await?;
 
 	log::info!("Test finished successfully");
 
