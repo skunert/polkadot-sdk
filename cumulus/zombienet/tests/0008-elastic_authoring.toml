@@ -27,16 +27,16 @@ args = ["-lruntime=debug,parachain=trace"]
 count = 10
 
 # Slot based authoring with 3 cores and 2s slot duration
-[[parachains]]
-id = 2100
-chain = "elastic-scaling"
-add_to_genesis = true
-
-[[parachains.collators]]
-name = "collator-elastic"
-image = "{{COL_IMAGE}}"
-command = "test-parachain"
-args = ["-laura=trace,runtime=info,cumulus-consensus=trace,consensus::common=trace,parachain::collation-generation=trace,parachain::collator-protocol=trace,parachain=debug", "--force-authoring", "--experimental-use-slot-based"]
+#[[parachains]]
+#id = 2100
+#chain = "elastic-scaling"
+#add_to_genesis = true
+#
+#[[parachains.collators]]
+#name = "collator-elastic"
+#image = "{{COL_IMAGE}}"
+#command = "test-parachain"
+#args = ["-laura=trace,runtime=info,cumulus-consensus=trace,consensus::common=trace,parachain::collation-generation=trace,parachain::collator-protocol=trace,parachain=debug", "--force-authoring", "--experimental-use-slot-based"]
 
 [[parachains]]
 id = 2300

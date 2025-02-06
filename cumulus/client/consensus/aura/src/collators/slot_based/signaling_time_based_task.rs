@@ -23,15 +23,19 @@ use cumulus_relay_chain_interface::RelayChainInterface;
 use polkadot_primitives::{Block as RelayBlock, Id as ParaId};
 
 use crate::{
-	collators::slot_based::{
-		core_selector,
-		relay_chain_data_cache::{RelayChainData, RelayChainDataCache},
-		SignalingTaskMessage,
+	collators::{
+		cores_scheduled_for_para,
+		slot_based::{
+			core_selector,
+			relay_chain_data_cache::{RelayChainData, RelayChainDataCache},
+			SignalingTaskMessage,
+		},
 	},
 	LOG_TARGET,
 };
 use cumulus_client_collator::service::ServiceInterface as CollatorServiceInterface;
 use futures::prelude::*;
+use polkadot_primitives::vstaging::ClaimQueueOffset;
 use sc_client_api::{BlockBackend, UsageProvider};
 use sc_consensus_aura::SlotDuration;
 use sp_api::ProvideRuntimeApi;
@@ -82,6 +86,7 @@ struct SlotTimer<Block, Client, P> {
 	client: Arc<Client>,
 	drift: Duration,
 	block_production_interval: Option<Duration>,
+	last_reported_core_num: Option<u32>,
 	_marker: std::marker::PhantomData<(Block, Box<dyn Fn(P) + Send + Sync + 'static>)>,
 }
 
@@ -103,6 +108,7 @@ fn time_until_next_slot(slot_duration: Duration, drift: Duration) -> (Duration, 
 	(Duration::from_millis(remaining_millis as u64), Slot::from(next_slot as u64))
 }
 
+const RELAY_SLOT_DURATION: Duration = Duration::from_millis(6000);
 impl<Block, Client, P> SlotTimer<Block, Client, P>
 where
 	Block: BlockT,
@@ -112,31 +118,51 @@ where
 	P::Public: AppPublic + Member + Codec,
 	P::Signature: TryFrom<Vec<u8>> + Member + Codec,
 {
-	pub fn new_with_drift(
-		client: Arc<Client>,
-		drift: Duration,
-		block_production_interval: Option<Duration>,
-	) -> Self {
-		Self { client, drift, block_production_interval, _marker: Default::default() }
+	pub fn new_with_drift(client: Arc<Client>, drift: Duration) -> Self {
+		Self {
+			client,
+			drift,
+			block_production_interval: None,
+			last_reported_core_num: None,
+			_marker: Default::default(),
+		}
 	}
 
+	pub fn update_scheduling(&mut self, num_cores_next_block: u32) {
+		self.last_reported_core_num = Some(num_cores_next_block);
+	}
 	/// Returns a future that resolves when the next slot arrives.
 	pub async fn wait_until_next_slot(&self) -> Result<SlotInfo, ()> {
 		let Ok(slot_duration) = crate::slot_duration(&*self.client) else {
 			tracing::error!(target: crate::LOG_TARGET, "Failed to fetch slot duration from runtime.");
 			return Err(())
 		};
-		tracing::info!(target: LOG_TARGET, "Slot duration: {slot_duration:?}");
-		let (time_until_next_slot, next_slot) = time_until_next_slot(
-			self.block_production_interval.unwrap_or_else(|| slot_duration.as_duration()),
-			self.drift,
-		);
+		let para_slots_per_relay_block =
+			(RELAY_SLOT_DURATION.as_millis() / slot_duration.as_millis() as u128) as u32;
+		let expected_cores_next_relay = self.last_reported_core_num.unwrap_or(1);
+
+		let mut block_production_interval = slot_duration.as_duration();
+		if expected_cores_next_relay == para_slots_per_relay_block {
+			tracing::info!(
+				expected_cores_next_relay,
+				para_slots_per_relay_block,
+				"Expected cores match para slots."
+			);
+		} else if expected_cores_next_relay > para_slots_per_relay_block &&
+			slot_duration.as_duration() == RELAY_SLOT_DURATION
+		{
+			block_production_interval = slot_duration.as_duration() / expected_cores_next_relay;
+			tracing::info!(
+				?block_production_interval,
+				"We expect to produce for {expected_cores_next_relay} cores but only have {para_slots_per_relay_block} slots. Attempting to produce multiple blocks per slot."
+			);
+		}
+
+		let (time_until_next_slot, next_slot) =
+			time_until_next_slot(block_production_interval, self.drift);
 		tokio::time::sleep(time_until_next_slot).await;
 		let timestamp = sp_timestamp::Timestamp::from(
-			*next_slot *
-				self.block_production_interval
-					.unwrap_or_else(|| slot_duration.as_duration())
-					.as_millis() as u64,
+			*next_slot * block_production_interval.as_millis() as u64,
 		);
 		let aura_slot = Slot::from_timestamp(timestamp, slot_duration);
 		let timestamp = sp_timestamp::Timestamp::from(
@@ -144,6 +170,7 @@ where
 		);
 		tracing::info!(
 			?slot_duration,
+			?para_slots_per_relay_block,
 			?next_slot,
 			?timestamp,
 			?aura_slot,
@@ -189,11 +216,8 @@ where
 			collator_service,
 		} = params;
 
-		let slot_timer = SlotTimer::<_, _, P>::new_with_drift(
-			para_client.clone(),
-			slot_drift,
-			Some(Duration::from_secs(2)),
-		);
+		let mut scheduled_cores_preview = vec![];
+		let mut slot_timer = SlotTimer::<_, _, P>::new_with_drift(para_client.clone(), slot_drift);
 
 		let mut relay_chain_data_cache = RelayChainDataCache::new(relay_client.clone(), para_id);
 
@@ -208,6 +232,11 @@ where
 				tracing::warn!(target: crate::LOG_TARGET, "Unable to fetch latest relay chain block hash.");
 				continue
 			};
+
+			let core_outlook =
+				cores_scheduled_for_para(relay_parent, para_id, &relay_client, ClaimQueueOffset(1))
+					.await;
+			tracing::info!(num_cores = core_outlook.len(), "Corecount on the next relay.");
 
 			let Some((included_block, parent)) =
 				crate::collators::find_parent(relay_parent, para_id, &*para_backend, &relay_client)
@@ -243,6 +272,13 @@ where
 			else {
 				continue;
 			};
+
+			// Fetch the scheduled cores for the next relay block.
+			scheduled_cores_preview =
+				cores_scheduled_for_para(relay_parent, para_id, &relay_client, ClaimQueueOffset(1))
+					.await;
+
+			slot_timer.update_scheduling(scheduled_cores.len() as u32);
 
 			if scheduled_cores.is_empty() {
 				tracing::debug!(target: LOG_TARGET, "Parachain not scheduled, skipping slot.");
