@@ -107,26 +107,32 @@ impl_opaque_keys! {
 /// The para-id used in this runtime.
 pub const PARACHAIN_ID: u32 = 100;
 
-#[cfg(feature = "elastic-scaling-multi-block-slot")]
-const BLOCK_PROCESSING_VELOCITY: u32 = 6;
+#[cfg(all(
+	feature = "elastic-scaling-multi-block-slot",
+	not(any(feature = "elastic-scaling", feature = "elastic-scaling-500ms"))
+))]
+pub const BLOCK_PROCESSING_VELOCITY: u32 = 6;
 
-#[cfg(not(feature = "elastic-scaling-multi-block-slot"))]
-const BLOCK_PROCESSING_VELOCITY: u32 =
-	RELAY_CHAIN_SLOT_DURATION_MILLIS / (MILLISECS_PER_BLOCK as u32);
+#[cfg(all(
+	feature = "elastic-scaling-500ms",
+	not(any(feature = "elastic-scaling", feature = "elastic-scaling-multi-block-slot"))
+))]
+pub const BLOCK_PROCESSING_VELOCITY: u32 = 12;
 
-#[cfg(not(any(feature = "elastic-scaling", feature = "elastic-scaling-500ms")))]
-pub const MILLISECS_PER_BLOCK: u64 = 6000;
+#[cfg(feature = "elastic-scaling")]
+pub const BLOCK_PROCESSING_VELOCITY: u32 = 3;
 
-#[cfg(all(feature = "elastic-scaling", not(feature = "elastic-scaling-500ms")))]
-pub const MILLISECS_PER_BLOCK: u64 = 2000;
-
-#[cfg(feature = "elastic-scaling-500ms")]
-pub const MILLISECS_PER_BLOCK: u64 = 500;
+#[cfg(not(any(
+	feature = "elastic-scaling",
+	feature = "elastic-scaling-500ms",
+	feature = "elastic-scaling-multi-block-slot"
+)))]
+pub const BLOCK_PROCESSING_VELOCITY: u32 = 1;
 
 // The `+2` shouldn't be needed, https://github.com/paritytech/polkadot-sdk/issues/5260
 const UNINCLUDED_SEGMENT_CAPACITY: u32 = BLOCK_PROCESSING_VELOCITY * 2 + 2;
 
-pub const SLOT_DURATION: u64 = MILLISECS_PER_BLOCK;
+pub const SLOT_DURATION: u64 = 6000;
 
 const RELAY_CHAIN_SLOT_DURATION_MILLIS: u32 = 6000;
 
@@ -172,7 +178,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 pub const EPOCH_DURATION_IN_BLOCKS: u32 = 10 * MINUTES;
 
 // These time units are defined in number of blocks.
-pub const MINUTES: BlockNumber = 60_000 / (MILLISECS_PER_BLOCK as BlockNumber);
+pub const MINUTES: BlockNumber = 60_000 / (SLOT_DURATION as BlockNumber);
 pub const HOURS: BlockNumber = MINUTES * 60;
 pub const DAYS: BlockNumber = HOURS * 24;
 
@@ -249,14 +255,8 @@ impl cumulus_pallet_weight_reclaim::Config for Runtime {
 	type WeightInfo = ();
 }
 
-#[cfg(not(feature = "elastic-scaling-multi-block-slot"))]
 parameter_types! {
-	pub const MinimumPeriod: u64 = SLOT_DURATION / 2;
-}
-
-#[cfg(feature = "elastic-scaling-multi-block-slot")]
-parameter_types! {
-	pub const MinimumPeriod: u64 = SLOT_DURATION / 6;
+	pub const MinimumPeriod: u64 = 0;
 }
 
 parameter_types! {
@@ -324,14 +324,11 @@ impl pallet_glutton::Config for Runtime {
 	type WeightInfo = pallet_glutton::weights::SubstrateWeight<Runtime>;
 }
 
-const EXPECTED_RELAY_PARENT_AGE: u64 = 3;
-
-type ConsensusHook = cumulus_pallet_aura_ext::OlderParentFixedVelocityConsensusHook<
+type ConsensusHook = cumulus_pallet_aura_ext::FixedVelocityConsensusHook<
 	Runtime,
 	RELAY_CHAIN_SLOT_DURATION_MILLIS,
 	BLOCK_PROCESSING_VELOCITY,
 	UNINCLUDED_SEGMENT_CAPACITY,
-	EXPECTED_RELAY_PARENT_AGE,
 >;
 impl cumulus_pallet_parachain_system::Config for Runtime {
 	type WeightInfo = ();
@@ -468,11 +465,6 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl cumulus_pallet_aura_ext::RelayParentAgeApi<Block> for Runtime {
-		fn slot_offset() -> u64 {
-			EXPECTED_RELAY_PARENT_AGE
-		}
-	}
 
 	impl cumulus_primitives_aura::AuraUnincludedSegmentApi<Block> for Runtime {
 		fn can_build_upon(

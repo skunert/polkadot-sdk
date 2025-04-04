@@ -3,8 +3,8 @@
 
 use anyhow::anyhow;
 
-use crate::helpers::{
-	assert_finalized_block_height, assert_para_throughput, create_assign_core_call,
+use cumulus_zombienet_sdk_helpers::{
+	assert_finality_lag, assert_para_throughput, create_assign_core_call,
 };
 use polkadot_primitives::Id as ParaId;
 use serde_json::json;
@@ -37,12 +37,13 @@ async fn elastic_scaling_multiple_block_per_slot() -> Result<(), anyhow::Error> 
 	let alice = dev::alice();
 	assert_para_throughput(
 		&relay_client,
-		12,
+		10,
 		[(ParaId::from(PARA_ID), 8..11)].into_iter().collect(),
 	)
 	.await?;
+	assert_finality_lag(&para_node_elastic.wait_client().await?, 5).await?;
 
-	let assign_cores_call = create_assign_core_call(&[2, 3], PARA_ID);
+	let assign_cores_call = create_assign_core_call(&[(2, PARA_ID), (3, PARA_ID)]);
 
 	relay_client
 		.tx()
@@ -55,13 +56,13 @@ async fn elastic_scaling_multiple_block_per_slot() -> Result<(), anyhow::Error> 
 
 	assert_para_throughput(
 		&relay_client,
-		18,
+		15,
 		[(ParaId::from(PARA_ID), 39..46)].into_iter().collect(),
 	)
 	.await?;
-	assert_finalized_block_height(&para_node_elastic.wait_client().await?, 60..80).await?;
+	assert_finality_lag(&para_node_elastic.wait_client().await?, 20).await?;
 
-	let assign_cores_call = create_assign_core_call(&[4, 5, 6], PARA_ID);
+	let assign_cores_call = create_assign_core_call(&[(4, PARA_ID), (5, PARA_ID), (6, PARA_ID)]);
 	// Assign two extra cores to each parachain.
 	relay_client
 		.tx()
@@ -73,31 +74,34 @@ async fn elastic_scaling_multiple_block_per_slot() -> Result<(), anyhow::Error> 
 
 	assert_para_throughput(
 		&relay_client,
-		13,
-		[(ParaId::from(PARA_ID), 55..61)].into_iter().collect(),
+		10,
+		[(ParaId::from(PARA_ID), 52..61)].into_iter().collect(),
 	)
 	.await?;
-	assert_finalized_block_height(&para_node_elastic.wait_client().await?, 120..140).await?;
+	assert_finality_lag(&para_node_elastic.wait_client().await?, 30).await?;
 	log::info!("Test finished successfully");
 	Ok(())
 }
 
 async fn build_network_config() -> Result<NetworkConfig, anyhow::Error> {
 	let images = zombienet_sdk::environment::get_images_from_env();
+	log::info!("Using images: {images:?}");
 	NetworkConfigBuilder::new()
 		.with_relaychain(|r| {
 			let r = r
 				.with_chain("rococo-local")
 				.with_default_command("polkadot")
 				.with_default_image(images.polkadot.as_str())
-				.with_default_args(vec![("-lparachain=debug").into()])
+				.with_default_args(vec![("-lparachain=trace").into()])
+				.with_default_resources(|resources| {
+					resources.with_request_cpu(2).with_request_memory("2G")
+				})
 				.with_genesis_overrides(json!({
 					"configuration": {
 						"config": {
 							"scheduler_params": {
 								"num_cores": 7,
-								"max_validators_per_core": 1,
-								"lookahead": 5
+								"max_validators_per_core": 1
 							}
 						}
 					}
@@ -115,7 +119,7 @@ async fn build_network_config() -> Result<NetworkConfig, anyhow::Error> {
 				.with_default_args(vec![
 					("--authoring").into(),
 					("slot-based").into(),
-					("-lparachain=debug,aura=debug").into(),
+					("-lparachain=trace,aura=debug").into(),
 				])
 				.with_collator(|n| n.with_name("collator-0"))
 				.with_collator(|n| n.with_name("collator-1"))

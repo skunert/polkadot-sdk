@@ -15,6 +15,7 @@
 // limitations under the License.
 
 use crate::{
+	cli::AuthoringPolicy,
 	common::{
 		aura::{AuraIdT, AuraRuntimeApi},
 		rpc::BuildParachainRpcExtensions,
@@ -217,7 +218,7 @@ where
 		+ substrate_frame_rpc_system::AccountNonceApi<Block, AccountId, Nonce>,
 	AuraId: AuraIdT + Sync,
 {
-	if extra_args.use_slot_based_consensus {
+	if extra_args.authoring_policy == AuthoringPolicy::SlotBased {
 		Box::new(AuraNode::<
 			Block,
 			RuntimeApi,
@@ -250,7 +251,7 @@ where
 {
 	#[docify::export_content]
 	fn launch_slot_based_collator<CIDP, CHP, Proposer, CS, Spawner>(
-		params: SlotBasedParams<
+		params_with_export: SlotBasedParams<
 			Block,
 			ParachainBlockImport<
 				Block,
@@ -277,7 +278,9 @@ where
 		CS: CollatorServiceInterface<Block> + Send + Sync + Clone + 'static,
 		Spawner: SpawnNamed,
 	{
-		slot_based::run::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _, _>(params);
+		slot_based::run::<Block, <AuraId as AppCrypto>::Pair, _, _, _, _, _, _, _, _, _>(
+			params_with_export,
+		);
 	}
 }
 
@@ -319,7 +322,7 @@ where
 		_overseer_handle: OverseerHandle,
 		announce_block: Arc<dyn Fn(Hash, Option<Vec<u8>>) + Send + Sync>,
 		backend: Arc<ParachainBackend<Block>>,
-		_node_extra_args: NodeExtraArgs,
+		node_extra_args: NodeExtraArgs,
 		block_import_handle: SlotBasedBlockImportHandle<Block>,
 	) -> Result<(), Error> {
 		let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
@@ -359,10 +362,13 @@ where
 			slot_offset: Duration::from_secs(1),
 			block_import_handle,
 			spawner: task_manager.spawn_handle(),
+			export_pov: node_extra_args.export_pov,
+			max_pov_percentage: node_extra_args.max_pov_percentage,
 		};
 
 		// We have a separate function only to be able to use `docify::export` on this piece of
 		// code.
+
 		Self::launch_slot_based_collator(params);
 
 		Ok(())
@@ -482,6 +488,7 @@ where
 				collator_service,
 				authoring_duration: Duration::from_millis(2000),
 				reinitialize: false,
+				max_pov_percentage: node_extra_args.max_pov_percentage,
 			},
 		};
 

@@ -24,7 +24,7 @@ use cumulus_primitives_aura::AuraUnincludedSegmentApi;
 use cumulus_primitives_core::{GetCoreSelectorApi, PersistedValidationData};
 use cumulus_relay_chain_interface::RelayChainInterface;
 
-use polkadot_primitives::{Block as RelayBlock, Id as ParaId};
+use polkadot_primitives::{Block as RelayBlock, Id as ParaId, Header as RelayHeader};
 
 use super::CollatorMessage;
 use crate::{
@@ -40,7 +40,6 @@ use crate::{
 	LOG_TARGET,
 };
 use cumulus_pallet_aura_ext::RelayParentAgeApi;
-use cumulus_primitives_core::relay_chain::{BlockId, Hash, Header};
 use futures::prelude::*;
 use sc_client_api::{backend::AuxStore, BlockBackend, BlockOf, UsageProvider};
 use sc_consensus::BlockImport;
@@ -92,14 +91,19 @@ pub struct BuilderTaskParams<
 	pub authoring_duration: Duration,
 	/// Channel to send built blocks to the collation task.
 	pub collator_sender: sc_utils::mpsc::TracingUnboundedSender<CollatorMessage<Block>>,
+	/// Slot duration of the relay chain.
 	pub relay_chain_slot_duration: Duration,
 	/// Offset all time operations by this duration.
+	///
 	/// This is a time quantity that is subtracted from the actual timestamp when computing
 	/// the time left to enter a new slot. In practice, this *left-shifts* the clock time with the
 	/// intent to keep our "clock" slightly behind the relay chain one and thus reducing the
 	/// likelihood of encountering unfavorable notification arrival timings (i.e. we don't want to
 	/// wait for relay chain notifications because we woke up too early).
 	pub slot_offset: Duration,
+	/// The maximum percentage of the maximum PoV size that the collator can use.
+	/// It will be removed once https://github.com/paritytech/polkadot-sdk/issues/6020 is fixed.
+	pub max_pov_percentage: Option<u32>,
 }
 
 /// Run block-builder.
@@ -150,6 +154,7 @@ where
 			relay_chain_slot_duration,
 			para_backend,
 			slot_offset,
+			max_pov_percentage,
 		} = params;
 
 		let mut slot_timer = SlotTimer::<_, _, P>::new_with_offset(
@@ -176,7 +181,7 @@ where
 
 		loop {
 			// We wait here until the next slot arrives.
-			let Ok(para_slot) = slot_timer.wait_until_next_slot().await else {
+			let Some(para_slot) = slot_timer.wait_until_next_slot().await else {
 				return;
 			};
 
@@ -356,14 +361,14 @@ where
 			)
 			.await;
 
-			let allowed_pov_size = if cfg!(feature = "full-pov-size") {
-				validation_data.max_pov_size
+			let allowed_pov_size = if let Some(max_pov_percentage) = max_pov_percentage {
+				validation_data.max_pov_size * max_pov_percentage / 100
 			} else {
-				// Set the block limit to 50% of the maximum PoV size.
+				// Set the block limit to 85% of the maximum PoV size.
 				//
-				// TODO: If we got benchmarking that includes the proof size,
-				// we should be able to use the maximum pov size.
-				validation_data.max_pov_size / 2
+				// Once https://github.com/paritytech/polkadot-sdk/issues/6020 issue is
+				// fixed, this should be removed.
+				validation_data.max_pov_size * 85 / 100
 			} as usize;
 
 			let Ok(Some(candidate)) = collator
@@ -392,6 +397,7 @@ where
 				parachain_candidate: candidate,
 				validation_code_hash,
 				core_index: *core_index,
+				max_pov_size: validation_data.max_pov_size,
 			}) {
 				tracing::error!(target: crate::LOG_TARGET, ?err, "Unable to send block to collation task.");
 				return

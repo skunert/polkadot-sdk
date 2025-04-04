@@ -23,6 +23,7 @@ use crate::{
 		NodeExtraArgs,
 	},
 };
+use chain_spec_builder::ChainSpecBuilder;
 use clap::{Command, CommandFactory, FromArgMatches, ValueEnum};
 use sc_chain_spec::ChainSpec;
 use sc_cli::{
@@ -35,7 +36,6 @@ use std::{
 	marker::PhantomData,
 	path::PathBuf,
 };
-
 /// Trait that can be used to customize some of the customer-facing info related to the node binary
 /// that is being built using this library.
 ///
@@ -76,6 +76,19 @@ pub enum Subcommand {
 	Key(sc_cli::KeySubcommand),
 
 	/// Build a chain specification.
+	///
+	/// The `build-spec` command relies on the chain specification built (hard-coded) into the node
+	/// binary, and may utilize the genesis presets of the runtimes  also embedded in the nodes
+	/// that support  this command. Since `polkadot-omni-node` does not contain any embedded
+	/// runtime, and requires a `chain-spec` path to be passed to its `--chain` flag, the command
+	/// isn't bringing significant value as it does for other node binaries (e.g. the
+	///  `polkadot` binary).
+	///
+	/// For a more versatile `chain-spec` manipulation experience please check out the
+	/// `polkadot-omni-node chain-spec-builder` subcommand.
+	#[deprecated(
+		note = "build-spec will be removed after 1/06/2025. Use chain-spec-builder instead"
+	)]
 	BuildSpec(sc_cli::BuildSpecCmd),
 
 	/// Validate blocks.
@@ -93,9 +106,21 @@ pub enum Subcommand {
 	/// Revert the chain to a previous state.
 	Revert(sc_cli::RevertCmd),
 
+	/// Subcommand for generating and managing chain specifications.
+	///
+	/// A `chain-spec-builder` subcommand corresponds to the existing `chain-spec-builder` tool
+	/// (<https://crates.io/crates/staging-chain-spec-builder>), which can be used already standalone.
+	/// It provides the same functionality as the tool but bundled with `polkadot-omni-node` to
+	/// enable easier access to chain-spec generation, patching, converting to raw or validation,
+	/// from a single binary, which can be used as a parachain node tool
+	/// For a detailed usage guide please check out the standalone tool's crates.io or docs.rs
+	/// pages:
+	/// - <https://crates.io/crates/staging-chain-spec-builder>
+	/// - <https://docs.rs/staging-chain-spec-builder/latest/staging_chain_spec_builder/>
+	ChainSpecBuilder(ChainSpecBuilder),
+
 	/// Remove the whole chain.
 	PurgeChain(cumulus_client_cli::PurgeChainCmd),
-
 	/// Export the genesis state of the parachain.
 	#[command(alias = "export-genesis-state")]
 	ExportGenesisHead(cumulus_client_cli::ExportGenesisHeadCommand),
@@ -145,12 +170,12 @@ pub struct Cli<Config: CliConfig> {
 	///
 	/// Use slot-based collator which can handle elastic scaling.
 	/// Use with care, this flag is unstable and subject to change.
-	#[arg(long)]
+	#[arg(long, conflicts_with = "authoring")]
 	pub experimental_use_slot_based: bool,
 
 	/// Authoring style to use.
-	#[arg(long, default_value_t = AuthoringStyle::Lookahead)]
-	pub authoring: AuthoringStyle,
+	#[arg(long, default_value_t = AuthoringPolicy::Lookahead)]
+	pub authoring: AuthoringPolicy,
 
 	/// Disable automatic hardware benchmarks.
 	///
@@ -179,20 +204,21 @@ pub struct Cli<Config: CliConfig> {
 
 /// Collator implementation to use.
 #[derive(PartialEq, Debug, ValueEnum, Clone, Copy)]
-pub enum AuthoringStyle {
+pub enum AuthoringPolicy {
 	/// Use the lookahead collator. Builds a block once per imported relay chain block and
 	/// on relay chain forks. Default for asynchronous backing chains.
 	Lookahead,
 	/// Use the slot-based collator. Builds a block based on time. Can utilize multiple cores,
-	/// always builds on the best relay chain block available. Use this
+	/// always builds on the best relay chain block available. Should be used with elastic-scaling
+	/// chains.
 	SlotBased,
 }
 
-impl Display for AuthoringStyle {
+impl Display for AuthoringPolicy {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match self {
-			AuthoringStyle::Lookahead => write!(f, "lookahead"),
-			AuthoringStyle::SlotBased => write!(f, "slot-based"),
+			AuthoringPolicy::Lookahead => write!(f, "lookahead"),
+			AuthoringPolicy::SlotBased => write!(f, "slot-based"),
 		}
 	}
 }
@@ -200,9 +226,12 @@ impl Display for AuthoringStyle {
 impl<Config: CliConfig> Cli<Config> {
 	pub(crate) fn node_extra_args(&self) -> NodeExtraArgs {
 		NodeExtraArgs {
-			use_slot_based_consensus: self.experimental_use_slot_based ||
-				self.authoring == AuthoringStyle::SlotBased,
+			authoring_policy: self
+				.experimental_use_slot_based
+				.then(|| AuthoringPolicy::SlotBased)
+				.unwrap_or(self.authoring),
 			export_pov: self.export_pov_to_path.clone(),
+			max_pov_percentage: self.run.experimental_max_pov_percentage,
 		}
 	}
 }

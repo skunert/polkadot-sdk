@@ -9,7 +9,7 @@ num_cores = 4
 max_approval_coalesce_count = 5
 
 [relaychain]
-default_image = "{{ZOMBIENET_INTEGRATION_TEST_IMAGE}}"
+default_image = "{{RELAY_IMAGE}}"
 chain = "rococo-local"
 command = "polkadot"
 
@@ -22,7 +22,7 @@ name = "validator"
 args = ["-lruntime=debug,parachain=trace"]
 count = 8
 
-# Slot based authoring with 3 cores and 2s slot duration
+# Slot based authoring with 3 cores and 6s slot duration
 [[parachains]]
 id = 2100
 chain = "elastic-scaling"
@@ -32,7 +32,11 @@ add_to_genesis = true
 name = "collator-elastic"
 image = "{{COL_IMAGE}}"
 command = "test-parachain"
-args = ["-laura=trace,runtime=info,cumulus-consensus=trace,consensus::common=trace,parachain::collation-generation=trace,parachain::collator-protocol=trace,parachain=debug", "--force-authoring", "--authoring", "slot-based"]
+args = [
+	"--force-authoring",
+	"--authoring=slot-based",
+	"-laura=trace,runtime=info,cumulus-consensus=trace,consensus::common=trace,parachain::collation-generation=trace,parachain::collator-protocol=trace,parachain=debug"
+]
 
 # Slot based authoring with 1 core and 6s slot duration
 [[parachains]]
@@ -43,4 +47,8 @@ add_to_genesis = true
 name = "collator-single-core"
 image = "{{COL_IMAGE}}"
 command = "test-parachain"
-args = ["-laura=trace,runtime=info,cumulus-consensus=trace,consensus::common=trace,parachain::collation-generation=trace,parachain::collator-protocol=trace,parachain=debug", "--force-authoring", "--authoring", "slot-based"]
+args = [
+	"--force-authoring",
+	"--authoring=slot-based",
+	"-laura=trace,runtime=info,cumulus-consensus=trace,consensus::common=trace,parachain::collation-generation=trace,parachain::collator-protocol=trace,parachain=debug"
+]
