@@ -597,8 +597,10 @@ pub mod pallet {
 				relay_chain_state,
 				downward_messages,
 				horizontal_messages,
+				extra_parents,
 			} = data;
 
+			log::info!(target: "skunert", "Runtime here: Received extra relay parents: {}, {:?}", extra_parents.len(), extra_parents);
 			// Check that the associated relay chain block number is as expected.
 			T::CheckAssociatedRelayNumber::check_associated_relay_number(
 				vfp.relay_parent_number,

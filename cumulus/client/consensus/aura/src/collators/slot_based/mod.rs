@@ -67,11 +67,13 @@
 //! 2. Submission to the collation-generation subsystem
 
 use self::{block_builder_task::run_block_builder, collation_task::run_collation_task};
+pub use block_import::{SlotBasedBlockImport, SlotBasedBlockImportHandle};
 use codec::Codec;
 use consensus_common::ParachainCandidate;
 use cumulus_client_collator::service::ServiceInterface as CollatorServiceInterface;
 use cumulus_client_consensus_common::{self as consensus_common, ParachainBlockImportMarker};
 use cumulus_client_consensus_proposer::ProposerInterface;
+use cumulus_pallet_aura_ext::RelayParentAgeApi;
 use cumulus_primitives_aura::AuraUnincludedSegmentApi;
 use cumulus_primitives_core::{ClaimQueueOffset, CoreSelector, GetCoreSelectorApi};
 use cumulus_relay_chain_interface::RelayChainInterface;
@@ -92,8 +94,6 @@ use sp_inherents::CreateInherentDataProviders;
 use sp_keystore::KeystorePtr;
 use sp_runtime::traits::{Block as BlockT, Member, NumberFor, One};
 use std::{path::PathBuf, sync::Arc, time::Duration};
-
-pub use block_import::{SlotBasedBlockImport, SlotBasedBlockImportHandle};
 
 mod block_builder_task;
 mod block_import;
@@ -162,8 +162,10 @@ pub fn run<Block, P, BI, CIDP, Client, Backend, RClient, CHP, Proposer, CS, Spaw
 		+ Send
 		+ Sync
 		+ 'static,
-	Client::Api:
-		AuraApi<Block, P::Public> + GetCoreSelectorApi<Block> + AuraUnincludedSegmentApi<Block>,
+	Client::Api: AuraApi<Block, P::Public>
+		+ GetCoreSelectorApi<Block>
+		+ AuraUnincludedSegmentApi<Block>
+		+ RelayParentAgeApi<Block>,
 	Backend: sc_client_api::Backend<Block> + 'static,
 	RClient: RelayChainInterface + Clone + 'static,
 	CIDP: CreateInherentDataProviders<Block, ()> + 'static,

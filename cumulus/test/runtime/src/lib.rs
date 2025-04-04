@@ -475,6 +475,12 @@ impl_runtime_apis! {
 		}
 	}
 
+	impl cumulus_pallet_aura_ext::RelayParentAgeApi<Block> for Runtime {
+		fn slot_offset() -> u64 {
+			2
+		}
+	}
+
 	impl sp_consensus_aura::AuraApi<Block, AuraId> for Runtime {
 		fn slot_duration() -> sp_consensus_aura::SlotDuration {
 			sp_consensus_aura::SlotDuration::from_millis(SLOT_DURATION)

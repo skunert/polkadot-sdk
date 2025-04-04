@@ -25,7 +25,10 @@ use cumulus_relay_chain_interface::RelayChainInterface;
 
 mod mock;
 
-pub use cumulus_primitives_parachain_inherent::{ParachainInherentData, INHERENT_IDENTIFIER};
+use cumulus_primitives_core::relay_chain::Header as RelayHeader;
+pub use cumulus_primitives_parachain_inherent::{
+	ParachainInherentData, RelayParentExtraData, EXTRA_RP, INHERENT_IDENTIFIER,
+};
 pub use mock::{MockValidationDataInherentDataProvider, MockXcmConfig};
 
 const LOG_TARGET: &str = "parachain-inherent";
@@ -98,6 +101,7 @@ async fn collect_relay_storage_proof(
 
 	let mut relevant_keys = vec![
 		relay_well_known_keys::CURRENT_BLOCK_RANDOMNESS.to_vec(),
+		relay_well_known_keys::AUTHORITIES.to_vec(),
 		relay_well_known_keys::ONE_EPOCH_AGO_RANDOMNESS.to_vec(),
 		relay_well_known_keys::TWO_EPOCHS_AGO_RANDOMNESS.to_vec(),
 		relay_well_known_keys::CURRENT_SLOT.to_vec(),
@@ -147,6 +151,7 @@ impl ParachainInherentDataProvider {
 		relay_chain_interface: &impl RelayChainInterface,
 		validation_data: &PersistedValidationData,
 		para_id: ParaId,
+		required_rp_ancestry: Vec<RelayHeader>,
 	) -> Option<ParachainInherentData> {
 		let relay_chain_state =
 			collect_relay_storage_proof(relay_chain_interface, para_id, relay_parent).await?;
@@ -176,11 +181,13 @@ impl ParachainInherentDataProvider {
 			})
 			.ok()?;
 
+		tracing::info!(target: "skunert", ?required_rp_ancestry, "Creating parachain inherent with extra relay parents.");
 		Some(ParachainInherentData {
 			downward_messages,
 			horizontal_messages,
 			validation_data: validation_data.clone(),
 			relay_chain_state,
+			extra_parents: required_rp_ancestry,
 		})
 	}
 }
