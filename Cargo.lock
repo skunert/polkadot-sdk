@@ -4513,6 +4513,7 @@ dependencies = [
  "rand 0.8.5",
  "sc-client-api",
  "scale-info",
+ "sp-consensus-babe",
  "sp-consensus-slots",
  "sp-core 28.0.0",
  "sp-crypto-hashing 0.1.0",

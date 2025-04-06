@@ -346,6 +346,7 @@ where
 				relay_chain_state,
 				downward_messages: Default::default(),
 				horizontal_messages: Default::default(),
+				extra_parents: Default::default(),
 			};
 
 			let _ = cumulus_pallet_parachain_system::Pallet::<Runtime>::set_validation_data(

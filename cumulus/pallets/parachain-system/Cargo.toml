@@ -27,6 +27,7 @@ frame-system = { workspace = true }
 pallet-message-queue = { workspace = true }
 sp-core = { workspace = true }
 sp-externalities = { workspace = true }
+sp-consensus-babe = { workspace = true }
 sp-inherents = { workspace = true }
 sp-io = { workspace = true }
 sp-runtime = { workspace = true }

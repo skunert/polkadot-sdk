@@ -293,6 +293,14 @@ impl RelayChainStateProof {
 			.map_err(Error::ParaHead)
 	}
 
+	pub fn read_authorities(
+		&self,
+	) -> Result<Vec<(sp_consensus_babe::AuthorityId, sp_consensus_babe::BabeAuthorityWeight)>, Error>
+	{
+		read_entry(&self.trie_backend, &relay_chain::well_known_keys::AUTHORITIES, None)
+			.map_err(Error::ParaHead)
+	}
+
 	/// Read the [`Slot`](relay_chain::Slot) from the relay chain state proof.
 	///
 	/// The slot is slot of the relay chain block this state proof was extracted from.
