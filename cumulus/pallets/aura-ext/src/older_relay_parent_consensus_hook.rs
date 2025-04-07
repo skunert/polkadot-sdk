@@ -56,12 +56,6 @@ where
 		let velocity = V.max(1);
 		let relay_chain_slot = state_proof.read_slot().expect("failed to read relay chain slot");
 
-		if let Ok(relay_authorities) = state_proof.read_authorities() {
-			log::info!("runtime here: Received {} authorities in hook", relay_authorities.len());
-		} else {
-			log::info!("Fuck, no authorities found");
-		}
-
 		let (relay_chain_slot, authored_in_relay) = match pallet::RelaySlotInfo::<T>::get() {
 			Some((slot, authored)) if slot == relay_chain_slot => (slot, authored),
 			Some((slot, _)) if slot < relay_chain_slot => (relay_chain_slot, 0),

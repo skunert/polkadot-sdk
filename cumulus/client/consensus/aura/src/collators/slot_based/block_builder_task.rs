@@ -539,6 +539,8 @@ where
 
 		if relay_slot == target_relay_slot {
 			tracing::info!(target: "skunert", "Found matching target slot, returning header");
+			// Push the actual relay parent.
+			required_ancestors.push_front(header.clone());
 			return Ok((header, required_ancestors))
 		}
 

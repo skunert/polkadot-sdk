@@ -324,12 +324,13 @@ impl pallet_glutton::Config for Runtime {
 	type WeightInfo = pallet_glutton::weights::SubstrateWeight<Runtime>;
 }
 
+const RELAY_PARENT_OFFSET: u64 = 2;
 type ConsensusHook = cumulus_pallet_aura_ext::OlderParentFixedVelocityConsensusHook<
 	Runtime,
 	RELAY_CHAIN_SLOT_DURATION_MILLIS,
 	BLOCK_PROCESSING_VELOCITY,
 	UNINCLUDED_SEGMENT_CAPACITY,
-	2,
+	RELAY_PARENT_OFFSET,
 >;
 impl cumulus_pallet_parachain_system::Config for Runtime {
 	type WeightInfo = ();
@@ -478,7 +479,7 @@ impl_runtime_apis! {
 
 	impl cumulus_pallet_aura_ext::RelayParentAgeApi<Block> for Runtime {
 		fn slot_offset() -> u64 {
-			2
+			RELAY_PARENT_OFFSET
 		}
 	}
 

@@ -55,7 +55,7 @@ use frame_system::{ensure_none, ensure_root, pallet_prelude::HeaderFor};
 use polkadot_parachain_primitives::primitives::RelayChainBlockNumber;
 use polkadot_runtime_parachains::FeeTracker;
 use scale_info::TypeInfo;
-use sp_core::U256;
+use sp_core::{Pair, U256};
 use sp_runtime::{
 	traits::{Block as BlockT, BlockNumberProvider, Hash, One},
 	BoundedSlice, FixedU128, RuntimeDebug, Saturating,
@@ -108,6 +108,7 @@ pub use consensus_hook::{ConsensusHook, ExpectParentIncluded};
 /// ```
 pub use cumulus_pallet_parachain_system_proc_macro::register_validate_block;
 pub use relay_state_snapshot::{MessagingStateSnapshot, RelayChainStateProof};
+use sp_runtime::traits::Header;
 pub use unincluded_segment::{Ancestor, UsedBandwidth};
 
 pub use pallet::*;
@@ -238,6 +239,11 @@ pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
+	use log::trace;
+	use sp_consensus_babe::{
+		digests::{CompatibleDigestItem, PreDigest, SecondaryPlainPreDigest},
+		AuthorityPair,
+	};
 
 	#[pallet::pallet]
 	#[pallet::storage_version(migration::STORAGE_VERSION)]
@@ -558,6 +564,30 @@ pub mod pallet {
 		}
 	}
 
+	/// Extract the BABE pre digest from the given header. Pre-runtime digests are
+	/// mandatory, the function will return `Err` if none is found.
+	// TODO skunert copied from sc-consensus-babe, see if we can move it to primitives
+	pub fn find_babe_pre_digest<H: Header>(header: &H) -> Result<PreDigest, ()> {
+		// genesis block doesn't contain a pre digest so let's generate a
+		// dummy one to not break any invariants in the rest of the code
+		if header.number().is_zero() {
+			return Ok(PreDigest::SecondaryPlain(SecondaryPlainPreDigest {
+				slot: 0.into(),
+				authority_index: 0,
+			}))
+		}
+
+		let mut pre_digest: Option<_> = None;
+		for log in header.digest().logs() {
+			match (log.as_babe_pre_digest(), pre_digest.is_some()) {
+				(Some(_), true) => panic!("Multiple predigests"),
+				(None, _) => {},
+				(s, false) => pre_digest = s,
+			}
+		}
+		pre_digest.ok_or_else(|| ())
+	}
+
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		/// Set the current validation data.
@@ -597,10 +627,9 @@ pub mod pallet {
 				relay_chain_state,
 				downward_messages,
 				horizontal_messages,
-				extra_parents,
+				mut extra_parents,
 			} = data;
 
-			log::info!(target: "skunert", "Runtime here: Received extra relay parents: {}, {:?}", extra_parents.len(), extra_parents);
 			// Check that the associated relay chain block number is as expected.
 			T::CheckAssociatedRelayNumber::check_associated_relay_number(
 				vfp.relay_parent_number,
@@ -613,6 +642,59 @@ pub mod pallet {
 				relay_chain_state.clone(),
 			)
 			.expect("Invalid relay chain state proof");
+
+			log::info!(target: "skunert", "Runtime here: Received extra relay parents: {}, {:?}", extra_parents.len(), extra_parents);
+			{
+				// TODO skunert replace this with actual configurable value
+				let expected_number_of_parents = 2;
+				if extra_parents.len() != expected_number_of_parents + 1 {
+					log::error!(
+						"Received {} number of parents, but expected {}",
+						extra_parents.len(),
+						expected_number_of_parents
+					);
+				}
+
+				let Ok(relay_authorities) = relay_state_proof.read_authorities() else {
+					panic!("No authorities delivered in state proof!");
+				};
+
+				let mut next_expected_hash = None;
+				for mut parent in extra_parents.into_iter().rev() {
+					let original_hash = parent.hash();
+					let original_number = parent.number().clone();
+					if vfp.relay_parent_storage_root == *parent.state_root() {
+						log::info!("Found our RP {parent:?}, aborting");
+						break;
+					}
+
+					// Verify that the blocks actually form a chain
+					if let Some(expected_hash) = next_expected_hash {
+						if original_hash != expected_hash {
+							panic!(
+								"Expected {}, but found {} as hash.",
+								expected_hash, original_hash
+							);
+						}
+					}
+					log::info!(target: "skunert", "Validating header #{} ({})",	original_number,  original_hash);
+					let Ok(pre_digest) = find_babe_pre_digest(&parent) else {
+						panic!("Relay header without predigest");
+					};
+					let authority_index = pre_digest.authority_index() as usize;
+					let authority_id = &relay_authorities[authority_index as usize].0;
+					let seal = parent.digest_mut().pop().expect("No seal on relay block");
+					let pre_hash = parent.hash();
+
+					let signature = seal.as_babe_seal().expect("Can not cast to signature!");
+
+					if !AuthorityPair::verify(&signature, pre_hash, authority_id) {
+						panic!("Bad Signature on RP #{}({})", original_number, original_hash)
+					}
+					next_expected_hash = Some(parent.parent_hash().clone());
+					log::info!(target: "skunert", "Validated header #{} ({})",	original_number,  original_hash);
+				}
+			}
 
 			// Update the desired maximum capacity according to the consensus hook.
 			let (consensus_hook_weight, capacity) =
