@@ -232,19 +232,20 @@ where
 				para_slot.timestamp
 			);
 
-			let Ok((relay_parent_header, required_rp_ancestry)) = find_offset_rp(
-				&relay_client,
-				relay_parent,
-				relay_parent_offset,
-				para_slot.slot,
-				slot_duration,
-				relay_chain_slot_duration,
-			)
-			.await
+			let Ok((relay_parent_header, required_rp_ancestry, include_next_session_auth)) =
+				find_offset_rp(
+					&relay_client,
+					relay_parent.clone(),
+					relay_parent_offset,
+					para_slot.slot,
+					slot_duration,
+					relay_chain_slot_duration,
+				)
+				.await
 			else {
 				continue
 			};
-			tracing::info!(target: "skunert", ancestry_len = required_rp_ancestry.len(), relay_parent_offset, "Fetched parent");
+
 			{
 				let Ok(pre_digest) =
 					sc_consensus_babe::find_pre_digest::<RelayBlock>(&relay_parent_header)
@@ -468,6 +469,13 @@ fn get_slot_from_relay_parent(header: &RelayHeader) -> Slot {
 	relay_slot
 }
 
+fn contains_epoch_digest(header: &RelayHeader) -> bool {
+	sc_consensus_babe::find_next_epoch_digest::<RelayBlock>(header)
+		.ok()
+		.flatten()
+		.is_some()
+}
+
 async fn find_offset_rp<RelayClient>(
 	relay_client: &RelayClient,
 	relay_parent: RelayHash,
@@ -475,10 +483,11 @@ async fn find_offset_rp<RelayClient>(
 	para_slot: Slot,
 	slot_duration: SlotDuration,
 	relay_chain_slot_duration: Duration,
-) -> Result<(RelayHeader, VecDeque<RelayHeader>), ()>
+) -> Result<(RelayHeader, VecDeque<RelayHeader>, bool), ()>
 where
 	RelayClient: RelayChainInterface + Clone + 'static,
 {
+	let mut requires_next_session_authorities = false;
 	tracing::info!(
 		target: "skunert",
 		"Finding relay parent with offset: relay_parent={:?}, offset={}, para_slot={:?}",
@@ -493,7 +502,7 @@ where
 
 	if relay_parent_offset == 0 {
 		tracing::info!(target: "skunert", "No offset requested, returning relay parent header");
-		return Ok((relay_parent_header, Default::default()));
+		return Ok((relay_parent_header, Default::default(), requires_next_session_authorities));
 	}
 
 	let Some(slot_timestamp) = para_slot.timestamp(slot_duration) else {
@@ -525,15 +534,18 @@ where
 			relay_client.header(BlockId::Hash(*relay_parent_header.parent_hash())).await
 		else {
 			tracing::info!(target: "skunert", "Reached chain start or failed to fetch header, returning last valid header");
-			return Ok((relay_parent_header, Default::default()))
+			return Ok((relay_parent_header, Default::default(), requires_next_session_authorities));
 		};
 
+		if contains_epoch_digest(&header) {
+			requires_next_session_authorities = true;
+		}
 		relay_slot = get_slot_from_relay_parent(&header);
 		tracing::info!(target: "skunert", "Found relay slot: {:?}", relay_slot);
 
 		if relay_slot < target_relay_slot {
 			tracing::error!(target: "skunert", "Found slot earlier than target slot - this should never happen");
-			return Ok((relay_parent_header, Default::default()))
+			return Ok((relay_parent_header, Default::default(), requires_next_session_authorities))
 			// panic!("Found slot earlier than target slot");
 		}
 
@@ -541,7 +553,7 @@ where
 			tracing::info!(target: "skunert", "Found matching target slot, returning header");
 			// Push the actual relay parent.
 			required_ancestors.push_front(header.clone());
-			return Ok((header, required_ancestors))
+			return Ok((header, required_ancestors, requires_next_session_authorities))
 		}
 
 		tracing::info!(target: "skunert", "Continuing search - updating relay parent header");

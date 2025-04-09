@@ -241,7 +241,7 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	use log::trace;
 	use sp_consensus_babe::{
-		digests::{CompatibleDigestItem, PreDigest, SecondaryPlainPreDigest},
+		digests::{CompatibleDigestItem, NextEpochDescriptor, PreDigest, SecondaryPlainPreDigest},
 		AuthorityPair,
 	};
 
@@ -567,25 +567,38 @@ pub mod pallet {
 	/// Extract the BABE pre digest from the given header. Pre-runtime digests are
 	/// mandatory, the function will return `Err` if none is found.
 	// TODO skunert copied from sc-consensus-babe, see if we can move it to primitives
-	pub fn find_babe_pre_digest<H: Header>(header: &H) -> Result<PreDigest, ()> {
+	pub fn find_babe_pre_digest<H: Header>(
+		header: &H,
+	) -> Result<(PreDigest, Option<NextEpochDescriptor>), ()> {
 		// genesis block doesn't contain a pre digest so let's generate a
 		// dummy one to not break any invariants in the rest of the code
 		if header.number().is_zero() {
-			return Ok(PreDigest::SecondaryPlain(SecondaryPlainPreDigest {
-				slot: 0.into(),
-				authority_index: 0,
-			}))
+			return Ok((
+				PreDigest::SecondaryPlain(SecondaryPlainPreDigest {
+					slot: 0.into(),
+					authority_index: 0,
+				}),
+				None,
+			))
 		}
 
-		let mut pre_digest: Option<_> = None;
+		let mut babe_pre_digest = None;
+		let mut next_epoch_digest = None;
 		for log in header.digest().logs() {
-			match (log.as_babe_pre_digest(), pre_digest.is_some()) {
-				(Some(_), true) => panic!("Multiple predigests"),
-				(None, _) => {},
-				(s, false) => pre_digest = s,
+			if let Some(digest) = log.as_babe_pre_digest() {
+				babe_pre_digest = Some(digest);
+			}
+
+			if let Some(digest) = log.as_next_epoch_descriptor() {
+				next_epoch_digest = Some(digest);
 			}
 		}
-		pre_digest.ok_or_else(|| ())
+
+		if let Some(pre_digest) = babe_pre_digest {
+			Ok((pre_digest, next_epoch_digest))
+		} else {
+			Err(())
+		}
 	}
 
 	#[pallet::call]
@@ -660,6 +673,9 @@ pub mod pallet {
 				};
 
 				let mut next_expected_hash = None;
+
+				let next_authorities = relay_state_proof.read_next_authorities().ok().flatten();
+				let mut next_auth_were_required = false;
 				for mut parent in extra_parents.into_iter().rev() {
 					let original_hash = parent.hash();
 					let original_number = parent.number().clone();
@@ -678,21 +694,37 @@ pub mod pallet {
 						}
 					}
 					log::info!(target: "skunert", "Validating header #{} ({})",	original_number,  original_hash);
-					let Ok(pre_digest) = find_babe_pre_digest(&parent) else {
+					let Ok((pre_digest, next_epoch_descriptor)) = find_babe_pre_digest(&parent)
+					else {
 						panic!("Relay header without predigest");
 					};
+
 					let authority_index = pre_digest.authority_index() as usize;
-					let authority_id = &relay_authorities[authority_index as usize].0;
+					let authority_id = if let Some(_) = next_epoch_descriptor {
+						log::info!(target: "skunert", "Header contains epoch change! Using next authority set.");
+						let Some(ref next_epoch_authorities) = next_authorities else {
+							next_auth_were_required = true;
+							panic!(
+								"Found next epoch descriptor, but no authorities where provided"
+							);
+						};
+						next_epoch_authorities[authority_index].0.clone()
+					} else {
+						relay_authorities[authority_index].0.clone()
+					};
 					let seal = parent.digest_mut().pop().expect("No seal on relay block");
 					let pre_hash = parent.hash();
 
 					let signature = seal.as_babe_seal().expect("Can not cast to signature!");
 
-					if !AuthorityPair::verify(&signature, pre_hash, authority_id) {
+					if !AuthorityPair::verify(&signature, pre_hash, &authority_id) {
 						panic!("Bad Signature on RP #{}({})", original_number, original_hash)
 					}
 					next_expected_hash = Some(parent.parent_hash().clone());
 					log::info!(target: "skunert", "Validated header #{} ({})",	original_number,  original_hash);
+				}
+				if !next_auth_were_required && next_authorities.is_some() {
+					panic!("Next authorities where not used but where included in the storage proof, this bad");
 				}
 			}
 

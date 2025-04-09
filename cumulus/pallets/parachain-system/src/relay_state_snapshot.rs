@@ -301,6 +301,16 @@ impl RelayChainStateProof {
 			.map_err(Error::ParaHead)
 	}
 
+	pub fn read_next_authorities(
+		&self,
+	) -> Result<
+		Option<Vec<(sp_consensus_babe::AuthorityId, sp_consensus_babe::BabeAuthorityWeight)>>,
+		Error,
+	> {
+		read_optional_entry(&self.trie_backend, &relay_chain::well_known_keys::NEXT_AUTHORITIES)
+			.map_err(Error::ParaHead)
+	}
+
 	/// Read the [`Slot`](relay_chain::Slot) from the relay chain state proof.
 	///
 	/// The slot is slot of the relay chain block this state proof was extracted from.
