@@ -41,11 +41,9 @@ use sp_runtime::traits::{Block as BlockT, Header as HeaderT};
 
 pub mod consensus_hook;
 pub mod migration;
-pub mod older_relay_parent_consensus_hook;
 mod test;
 
 pub use consensus_hook::FixedVelocityConsensusHook;
-pub use older_relay_parent_consensus_hook::OlderParentFixedVelocityConsensusHook;
 
 type Aura<T> = pallet_aura::Pallet<T>;
 

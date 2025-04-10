@@ -83,7 +83,7 @@ pub struct ParachainInherentData {
 	/// were sent. In combination with the rule of no more than one message in a channel per block,
 	/// this means `sent_at` is **strictly** greater than the previous one (if any).
 	pub horizontal_messages: BTreeMap<ParaId, Vec<InboundHrmpMessage>>,
-	pub extra_parents: Vec<RelayHeader>,
+	pub relay_parent_descendants: Vec<RelayHeader>,
 }
 
 #[cfg(feature = "std")]

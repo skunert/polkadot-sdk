@@ -302,6 +302,8 @@ pub mod pallet {
 
 		/// Select core.
 		type SelectCore: SelectCore;
+
+		type RelayParentOffset: Get<u32>;
 	}
 
 	#[pallet::hooks]
@@ -611,6 +613,86 @@ pub mod pallet {
 		}
 	}
 
+	fn verify_relay_parent_descendants(
+		relay_state_proof: &RelayChainStateProof,
+		relay_parent_descendants: Vec<relay_chain::Header>,
+		relay_parent_state_root: relay_chain::Hash,
+		expected_number_of_parents: u32,
+	) -> bool {
+		if relay_parent_descendants.len() != expected_number_of_parents as usize + 1 {
+			log::error!(
+				"Received {} number of parents, but expected {}",
+				relay_parent_descendants.len(),
+				expected_number_of_parents
+			);
+		}
+
+		let Ok(relay_authorities) = relay_state_proof.read_authorities() else {
+			panic!("No authorities delivered in state proof!");
+		};
+
+		let mut next_expected_hash = None;
+
+		let next_authorities = relay_state_proof.read_next_authorities().ok().flatten();
+		let mut next_auth_were_required = false;
+
+		if let Some(relay_parent) = relay_parent_descendants.get(0) {
+			if relay_parent.state_root != relay_parent_state_root {
+				return false;
+			}
+		};
+
+		for mut parent in relay_parent_descendants.into_iter().rev() {
+			// Hash calculated while seal is intact
+			let post_hash = parent.hash();
+			let relay_number = parent.number().clone();
+			if relay_parent_state_root == *parent.state_root() {
+				log::info!("Found our RP {parent:?}, aborting");
+				break;
+			}
+
+			// Verify that the blocks actually form a chain
+			if let Some(expected_hash) = next_expected_hash {
+				if post_hash != expected_hash {
+					panic!("Expected {}, but found {} as hash.", expected_hash, post_hash);
+				}
+			}
+			log::info!(target: "skunert", "Validating header #{} ({})",	relay_number,  post_hash);
+			let Ok((pre_digest, next_epoch_descriptor)) = find_babe_pre_digest(&parent) else {
+				panic!("Relay header without predigest");
+			};
+
+			let authority_index = pre_digest.authority_index() as usize;
+			let authority_id = if let Some(_) = next_epoch_descriptor {
+				log::info!(target: "skunert", "Header contains epoch change! Using next authority set.");
+				let Some(ref next_epoch_authorities) = next_authorities else {
+					next_auth_were_required = true;
+					panic!("Found next epoch descriptor, but no authorities where provided");
+				};
+				next_epoch_authorities[authority_index].0.clone()
+			} else {
+				relay_authorities[authority_index].0.clone()
+			};
+			let seal = parent.digest_mut().pop().expect("No seal on relay block");
+			let pre_hash = parent.hash();
+
+			let signature = seal.as_babe_seal().expect("Can not cast to signature!");
+
+			if !AuthorityPair::verify(&signature, pre_hash, &authority_id) {
+				panic!("Bad Signature on RP #{}({})", relay_number, post_hash)
+			}
+			next_expected_hash = Some(parent.parent_hash().clone());
+			log::info!(target: "skunert", "Validated header #{} ({})",	relay_number,  post_hash);
+		}
+
+		if !next_auth_were_required && next_authorities.is_some() {
+			panic!(
+				"Next authorities where not used but where included in the storage proof, this bad"
+			);
+		}
+		true
+	}
+
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		/// Set the current validation data.
@@ -650,7 +732,7 @@ pub mod pallet {
 				relay_chain_state,
 				downward_messages,
 				horizontal_messages,
-				mut extra_parents,
+				mut relay_parent_descendants,
 			} = data;
 
 			// Check that the associated relay chain block number is as expected.
@@ -666,76 +748,16 @@ pub mod pallet {
 			)
 			.expect("Invalid relay chain state proof");
 
-			log::info!(target: "skunert", "Runtime here: Received extra relay parents: {}, {:?}", extra_parents.len(), extra_parents);
-			{
-				// TODO skunert replace this with actual configurable value
-				let expected_number_of_parents = 2;
-				if extra_parents.len() != expected_number_of_parents + 1 {
-					log::error!(
-						"Received {} number of parents, but expected {}",
-						extra_parents.len(),
-						expected_number_of_parents
-					);
-				}
+			log::info!(target: "skunert", "Runtime here: Received extra relay parents: {}, {:?}", relay_parent_descendants.len(), relay_parent_descendants);
+			let expected_number_of_parents = T::RelayParentOffset::get();
 
-				let Ok(relay_authorities) = relay_state_proof.read_authorities() else {
-					panic!("No authorities delivered in state proof!");
-				};
-
-				let mut next_expected_hash = None;
-
-				let next_authorities = relay_state_proof.read_next_authorities().ok().flatten();
-				let mut next_auth_were_required = false;
-				for mut parent in extra_parents.into_iter().rev() {
-					let original_hash = parent.hash();
-					let original_number = parent.number().clone();
-					if vfp.relay_parent_storage_root == *parent.state_root() {
-						log::info!("Found our RP {parent:?}, aborting");
-						break;
-					}
-
-					// Verify that the blocks actually form a chain
-					if let Some(expected_hash) = next_expected_hash {
-						if original_hash != expected_hash {
-							panic!(
-								"Expected {}, but found {} as hash.",
-								expected_hash, original_hash
-							);
-						}
-					}
-					log::info!(target: "skunert", "Validating header #{} ({})",	original_number,  original_hash);
-					let Ok((pre_digest, next_epoch_descriptor)) = find_babe_pre_digest(&parent)
-					else {
-						panic!("Relay header without predigest");
-					};
-
-					let authority_index = pre_digest.authority_index() as usize;
-					let authority_id = if let Some(_) = next_epoch_descriptor {
-						log::info!(target: "skunert", "Header contains epoch change! Using next authority set.");
-						let Some(ref next_epoch_authorities) = next_authorities else {
-							next_auth_were_required = true;
-							panic!(
-								"Found next epoch descriptor, but no authorities where provided"
-							);
-						};
-						next_epoch_authorities[authority_index].0.clone()
-					} else {
-						relay_authorities[authority_index].0.clone()
-					};
-					let seal = parent.digest_mut().pop().expect("No seal on relay block");
-					let pre_hash = parent.hash();
-
-					let signature = seal.as_babe_seal().expect("Can not cast to signature!");
-
-					if !AuthorityPair::verify(&signature, pre_hash, &authority_id) {
-						panic!("Bad Signature on RP #{}({})", original_number, original_hash)
-					}
-					next_expected_hash = Some(parent.parent_hash().clone());
-					log::info!(target: "skunert", "Validated header #{} ({})",	original_number,  original_hash);
-				}
-				if !next_auth_were_required && next_authorities.is_some() {
-					panic!("Next authorities where not used but where included in the storage proof, this bad");
-				}
+			if expected_number_of_parents > 0 {
+				verify_relay_parent_descendants(
+					&relay_state_proof,
+					relay_parent_descendants,
+					vfp.relay_parent_storage_root,
+					expected_number_of_parents,
+				);
 			}
 
 			// Update the desired maximum capacity according to the consensus hook.

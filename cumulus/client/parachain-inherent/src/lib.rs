@@ -205,7 +205,7 @@ impl ParachainInherentDataProvider {
 			horizontal_messages,
 			validation_data: validation_data.clone(),
 			relay_chain_state,
-			extra_parents: required_rp_ancestry,
+			relay_parent_descendants: required_rp_ancestry,
 		})
 	}
 }
