@@ -113,6 +113,8 @@ pub use unincluded_segment::{Ancestor, UsedBandwidth};
 
 pub use pallet::*;
 
+const LOG_TARGET: &str = "parachain-system";
+
 /// Something that can check the associated relay block number.
 ///
 /// Each Parachain block is built in the context of a relay chain block, this trait allows us
@@ -239,7 +241,6 @@ pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use log::trace;
 	use sp_consensus_babe::{
 		digests::{CompatibleDigestItem, NextEpochDescriptor, PreDigest, SecondaryPlainPreDigest},
 		AuthorityPair,
@@ -613,15 +614,45 @@ pub mod pallet {
 		}
 	}
 
-	fn verify_relay_parent_descendants(
+	/// Verifies that the provided relay parent descendants form a valid chain
+	/// and are signed by relay chain authorities. If relay chain descendants shall be checked,
+	/// a set of authorities for the epoch of the relay parent must be provided in the
+	/// relay chain state proof. If any of the descendants indicate the beginning of a new epoch,
+	/// the authority set for the next relay chain epoch must be included in the state proof too.
+	///
+	/// # Parameters
+	///
+	/// - `relay_state_proof`: The proof of the relay chain state, which contains details about the
+	///   authority sets and other chain data.
+	/// - `relay_parent_descendants`: A vector of relay chain headers representing the descendants
+	///   of the relay parent that need to be validated.
+	/// - `relay_parent_state_root`: The state root hash of the relay parent. This
+	///   will be matched with the initial relay parent header from the descendants.
+	///   **Note:** This parameter can be removed once the hash of the relay parent is available
+	///   to the runtime. https://github.com/paritytech/polkadot-sdk/issues/83
+	/// - `expected_number_of_parents`: The expected number of parent headers in the
+	///   `relay_parent_descendants`. A mismatch will cause the function to panic.
+	///
+	/// # Panics
+	///
+	/// This function will panic under the following scenarios:
+	///
+	/// - The number of headers in `relay_parent_descendants` does not match
+	///   `expected_number_of_parents`.
+	/// - No authorities are provided in the state proof.
+	/// - The state root of the provided relay parent does not match the expected value.
+	/// - A relay header does not contain a BABE pre-digest.
+	/// - A header is found with an invalid seal signature, or the authorities required to verify
+	///   the signature are missing (current or next epoch).
+	pub fn verify_relay_parent_descendants<H: Header>(
 		relay_state_proof: &RelayChainStateProof,
-		relay_parent_descendants: Vec<relay_chain::Header>,
-		relay_parent_state_root: relay_chain::Hash,
+		relay_parent_descendants: Vec<H>,
+		relay_parent_state_root: H::Hash,
 		expected_number_of_parents: u32,
-	) -> bool {
-		if relay_parent_descendants.len() != expected_number_of_parents as usize + 1 {
-			log::error!(
-				"Received {} number of parents, but expected {}",
+	) {
+		if relay_parent_descendants.len() != expected_number_of_parents as usize {
+			panic!(
+				"Expected {} descendants of relay parent in `set_validation_data` inherent, received {}.",
 				relay_parent_descendants.len(),
 				expected_number_of_parents
 			);
@@ -634,63 +665,78 @@ pub mod pallet {
 		let mut next_expected_hash = None;
 
 		let next_authorities = relay_state_proof.read_next_authorities().ok().flatten();
-		let mut next_auth_were_required = false;
+		let mut required_next_authorities = false;
 
 		if let Some(relay_parent) = relay_parent_descendants.get(0) {
-			if relay_parent.state_root != relay_parent_state_root {
-				return false;
+			if *relay_parent.state_root() != relay_parent_state_root {
+				panic!(
+					"Relay parent provided in inherent has different state root than expected!\
+					expected: {:?} found: {:?}",
+					relay_parent.state_root(),
+					relay_parent_state_root
+				);
 			}
 		};
 
 		for mut parent in relay_parent_descendants.into_iter().rev() {
 			// Hash calculated while seal is intact
-			let post_hash = parent.hash();
+			let sealed_header_hash = parent.hash();
 			let relay_number = parent.number().clone();
-			if relay_parent_state_root == *parent.state_root() {
-				log::info!("Found our RP {parent:?}, aborting");
-				break;
-			}
 
 			// Verify that the blocks actually form a chain
 			if let Some(expected_hash) = next_expected_hash {
-				if post_hash != expected_hash {
-					panic!("Expected {}, but found {} as hash.", expected_hash, post_hash);
+				if sealed_header_hash != expected_hash {
+					panic!("Expected {expected_hash:?}, but found {sealed_header_hash:?} as hash.");
 				}
 			}
-			log::info!(target: "skunert", "Validating header #{} ({})",	relay_number,  post_hash);
+			log::debug!(target: LOG_TARGET, "Validating header #{relay_number:?} ({sealed_header_hash:?})");
 			let Ok((pre_digest, next_epoch_descriptor)) = find_babe_pre_digest(&parent) else {
 				panic!("Relay header without predigest");
 			};
 
 			let authority_index = pre_digest.authority_index() as usize;
 			let authority_id = if let Some(_) = next_epoch_descriptor {
-				log::info!(target: "skunert", "Header contains epoch change! Using next authority set.");
+				log::debug!(
+					target: LOG_TARGET,
+					"Header {sealed_header_hash:?} contains epoch change! \
+					Using next authority set to verify signature."
+				);
 				let Some(ref next_epoch_authorities) = next_authorities else {
-					next_auth_were_required = true;
-					panic!("Found next epoch descriptor, but no authorities where provided");
+					panic!(
+						"Relay parent descendant #{relay_number:?}({sealed_header_hash:?}) contains \
+						epoch change, but no authorities where provided for the next epoch."
+					);
 				};
-				next_epoch_authorities[authority_index].0.clone()
+				required_next_authorities = true;
+				&next_epoch_authorities[authority_index].0
 			} else {
-				relay_authorities[authority_index].0.clone()
+				&relay_authorities[authority_index].0
 			};
-			let seal = parent.digest_mut().pop().expect("No seal on relay block");
-			let pre_hash = parent.hash();
+			let seal = parent
+				.digest_mut()
+				.pop()
+				.expect("Valid relay chain block will always contain a seal.");
+			let signature =
+				seal.as_babe_seal().expect("Valid relay chain seal can be cast to signature.");
 
-			let signature = seal.as_babe_seal().expect("Can not cast to signature!");
-
-			if !AuthorityPair::verify(&signature, pre_hash, &authority_id) {
-				panic!("Bad Signature on RP #{}({})", relay_number, post_hash)
+			if !AuthorityPair::verify(&signature, parent.hash(), authority_id) {
+				panic!(
+					"Bad Signature on relay parent descendant #{relay_number:?}({sealed_header_hash:?})"
+				)
 			}
 			next_expected_hash = Some(parent.parent_hash().clone());
-			log::info!(target: "skunert", "Validated header #{} ({})",	relay_number,  post_hash);
+			log::debug!(target: LOG_TARGET, "Validated header #{relay_number:?}({sealed_header_hash:?})");
 		}
 
-		if !next_auth_were_required && next_authorities.is_some() {
-			panic!(
-				"Next authorities where not used but where included in the storage proof, this bad"
+		// There was no session change announced in the relay parent descendants.
+		// However, the node side provided the next authorities in the inherent state proof.
+		// This wastes some PoV space and indicates a bug in the node.
+		if !required_next_authorities && next_authorities.is_some() {
+			log::warn!(
+				"There was no session change in the relay parent or its descendants, \
+				but next authority was part of the storage proof. This wastes PoV space."
 			);
 		}
-		true
 	}
 
 	#[pallet::call]
@@ -732,7 +778,7 @@ pub mod pallet {
 				relay_chain_state,
 				downward_messages,
 				horizontal_messages,
-				mut relay_parent_descendants,
+				relay_parent_descendants,
 			} = data;
 
 			// Check that the associated relay chain block number is as expected.
@@ -749,7 +795,7 @@ pub mod pallet {
 			.expect("Invalid relay chain state proof");
 
 			log::info!(target: "skunert", "Runtime here: Received extra relay parents: {}, {:?}", relay_parent_descendants.len(), relay_parent_descendants);
-			let expected_number_of_parents = T::RelayParentOffset::get();
+			let expected_number_of_parents = T::RelayParentOffset::get() + 1;
 
 			if expected_number_of_parents > 0 {
 				verify_relay_parent_descendants(
@@ -1942,5 +1988,106 @@ impl<T: Config> RelaychainStateProvider for RelaychainDataProvider<T> {
 		validation_data.relay_parent_number = state.number;
 		validation_data.relay_parent_storage_root = state.state_root;
 		ValidationData::<T>::put(validation_data)
+	}
+}
+#[cfg(test)]
+mod tests2 {
+	use super::*;
+	use cumulus_test_relay_sproof_builder::RelayStateSproofBuilder;
+	use pallet_message_queue::mock_helpers::IntoWeight;
+	use rstest::rstest;
+	use sp_consensus_babe::{
+		digests::{CompatibleDigestItem, PreDigest, PrimaryPreDigest},
+		AuthorityId, BABE_ENGINE_ID,
+	};
+	use sp_core::{
+		sr25519::vrf::{VrfPreOutput, VrfProof, VrfSignature},
+		ByteArray, H256,
+	};
+	use sp_runtime::{testing::Header as TestHeader, DigestItem};
+	use sp_trie::StorageProof;
+
+	/// Helper function to create a mock `RelayChainStateProof`.
+	fn mock_relay_chain_state_proof(authorities: Vec<AuthorityId>) -> (H256, StorageProof) {
+		// Create a mock implementation or structure, adjust this to match the proof's definition
+		let mut p = RelayStateSproofBuilder::default();
+		let authorities = authorities.encode();
+		p.additional_key_values =
+			vec![(relay_chain::well_known_keys::AUTHORITIES.to_vec(), authorities)];
+		p.into_state_root_and_proof()
+	}
+
+	/// Helper function to create relay chain headers for testing.
+	fn mock_relay_chain_headers(count: usize) -> Vec<TestHeader> {
+		(0..count)
+			.map(|i| TestHeader {
+				parent_hash: H256::random(),
+				number: i as u64,
+				state_root: H256::random(),
+				extrinsics_root: H256::random(),
+				digest: Default::default(),
+			})
+			.collect()
+	}
+
+	/// This method generates some vrf data, but only to make the compiler happy.
+	/// This data is not verified and we don't care :).
+	fn generate_testing_vrf() -> VrfSignature {
+		let vrf_proof_bytes = [0u8; 64];
+		let proof: VrfProof = VrfProof::decode(&mut vrf_proof_bytes.as_slice()).unwrap();
+		let vrf_pre_out_bytes = [0u8; 32];
+		let pre_output: VrfPreOutput =
+			VrfPreOutput::decode(&mut vrf_pre_out_bytes.as_slice()).unwrap();
+		VrfSignature { pre_output, proof }
+	}
+
+	fn get_header_chain() -> (Vec<TestHeader>, Vec<AuthorityId>) {
+		let mut result = vec![];
+		let mut previous_hash = None;
+		for block_number in 0..3 {
+			let mut header = TestHeader::new_from_number(block_number);
+			if let Some(parent_hash) = previous_hash {
+				header.parent_hash = parent_hash;
+			}
+
+			let pre_digest = PrimaryPreDigest {
+				authority_index: 0u32.into(),
+				slot: block_number.into(),
+				vrf_signature: generate_testing_vrf(),
+			};
+
+			header
+				.digest_mut()
+				.push(DigestItem::babe_pre_digest(PreDigest::Primary(pre_digest)));
+
+			let header_pre_hash = header.hash();
+			let signature = sp_keyring::Sr25519Keyring::Alice.sign(header_pre_hash.as_bytes());
+			header.digest_mut().push(DigestItem::babe_seal(signature.into()));
+			previous_hash = Some(header.hash().clone());
+			result.push(header);
+		}
+		(result, vec![sp_keyring::Sr25519Keyring::Alice.public().into()])
+	}
+
+	#[rstest]
+	fn test_verify_relay_parent_descendants_valid_case() {
+		// Arrange
+		let (relay_parent_descendants, authorities) = get_header_chain();
+		let (hash, relay_state_proof) = mock_relay_chain_state_proof(authorities);
+		let relay_state_proof =
+			RelayChainStateProof::new(2000.into(), hash, relay_state_proof).expect("Should work");
+		let relay_parent_state_root = H256::random();
+		let expected_number_of_parents = 3;
+
+		// Act
+		verify_relay_parent_descendants(
+			&relay_state_proof,
+			relay_parent_descendants,
+			relay_parent_state_root,
+			expected_number_of_parents,
+		);
+
+		// Assert
+		// If the function doesn't panic, it passes as valid
 	}
 }
