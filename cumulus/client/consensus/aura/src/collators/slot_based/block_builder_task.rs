@@ -216,7 +216,7 @@ where
 				para_slot.slot, relay_parent_offset, slot_duration
 			);
 
-			para_slot.slot = Slot::from(*para_slot.slot - relay_parent_offset);
+			para_slot.slot = Slot::from(*para_slot.slot - relay_parent_offset as u64);
 
 			tracing::debug!(
 				target: "skunert",
@@ -479,7 +479,7 @@ fn contains_epoch_digest(header: &RelayHeader) -> bool {
 async fn find_offset_rp<RelayClient>(
 	relay_client: &RelayClient,
 	relay_parent: RelayHash,
-	relay_parent_offset: u64,
+	relay_parent_offset: u32,
 	para_slot: Slot,
 	slot_duration: SlotDuration,
 	relay_chain_slot_duration: Duration,

@@ -52,7 +52,7 @@ pub use pallet::*;
 sp_api::decl_runtime_apis! {
 	pub trait RelayParentAgeApi {
 		/// Fetch the slot offset that is expected from the relay chain.
-		fn slot_offset() -> u64;
+		fn slot_offset() -> u32;
 	}
 }
 
