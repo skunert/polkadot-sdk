@@ -2022,41 +2022,28 @@ mod tests2 {
 	use sp_runtime::{testing::Header as TestHeader, DigestItem};
 	use sp_trie::StorageProof;
 
+	const PARA_ID: u32 = 2000;
+
 	/// Helper function to create a mock `RelayChainStateProof`.
-	fn mock_relay_chain_state_proof(
-		authorities: Option<Vec<AuthorityId>>,
-		next_authorities: Option<Vec<AuthorityId>>,
+	fn build_relay_chain_storage_proof(
+		authorities: Option<Vec<(AuthorityId, BabeAuthorityWeight)>>,
+		next_authorities: Option<Vec<(AuthorityId, BabeAuthorityWeight)>>,
 	) -> (H256, StorageProof) {
 		// Create a mock implementation or structure, adjust this to match the proof's definition
-		let mut p = RelayStateSproofBuilder::default();
+		let mut proof_builder = RelayStateSproofBuilder::default();
 		if let Some(authorities) = authorities {
-			let authorities = authorities.into_iter().map(|auth| (auth, 0u64)).collect::<Vec<_>>();
-			let authorities = authorities.encode();
-			p.additional_key_values
-				.push((relay_chain::well_known_keys::AUTHORITIES.to_vec(), authorities));
+			proof_builder
+				.additional_key_values
+				.push((relay_chain::well_known_keys::AUTHORITIES.to_vec(), authorities.encode()));
 		}
 
 		if let Some(next_authorities) = next_authorities {
-			let authorities =
-				next_authorities.into_iter().map(|auth| (auth, 0u64)).collect::<Vec<_>>();
-			let authorities = authorities.encode();
-			p.additional_key_values
-				.push((relay_chain::well_known_keys::NEXT_AUTHORITIES.to_vec(), authorities));
+			proof_builder.additional_key_values.push((
+				relay_chain::well_known_keys::NEXT_AUTHORITIES.to_vec(),
+				next_authorities.encode(),
+			));
 		}
-		p.into_state_root_and_proof()
-	}
-
-	/// Helper function to create relay chain headers for testing.
-	fn mock_relay_chain_headers(count: usize) -> Vec<TestHeader> {
-		(0..count)
-			.map(|i| TestHeader {
-				parent_hash: H256::random(),
-				number: i as u64,
-				state_root: H256::random(),
-				extrinsics_root: H256::random(),
-				digest: Default::default(),
-			})
-			.collect()
+		proof_builder.into_state_root_and_proof()
 	}
 
 	/// This method generates some vrf data, but only to make the compiler happy.
@@ -2070,87 +2057,107 @@ mod tests2 {
 		VrfSignature { pre_output, proof }
 	}
 
-	fn get_header_chain(
+	/// Build a chain of relay parent descendants.
+	///
+	/// Returns the relay parent header as well as the current and next epoch authorities.
+	fn build_relay_parent_descendants(
 		num_headers: u64,
 		num_authorities: u64,
 		epoch_change_at: Option<u64>,
-	) -> (Vec<TestHeader>, Vec<AuthorityId>, Vec<AuthorityId>) {
-		let mut result = vec![];
+	) -> (
+		Vec<TestHeader>,
+		Vec<(AuthorityId, BabeAuthorityWeight)>,
+		Vec<(AuthorityId, BabeAuthorityWeight)>,
+	) {
+		// Generate initial authorities
+		let (authorities, next_authorities) = generate_authority_pairs(num_authorities);
+		let authorities_for_storage = convert_to_authority_weight_pair(&authorities);
+		let next_authorities_for_storage = convert_to_authority_weight_pair(&next_authorities);
+
+		// Generate headers chain
+		let mut headers = Vec::with_capacity(num_headers as usize);
+		let mut current_authorities = authorities.clone();
 		let mut previous_hash = None;
-		let mut authorities: Vec<sp_consensus_babe::AuthorityPair> = vec![];
-		let mut next_authorities: Vec<sp_consensus_babe::AuthorityPair> = vec![];
-		let mut past_epoch_change = false;
 
-		for i in 0..num_authorities {
-			authorities.push(Pair::generate().0);
-			next_authorities.push(Pair::generate().0);
-		}
-		let authorities_for_storage =
-			authorities.clone().into_iter().map(|auth| auth.public().into()).collect();
-		let next_authorities_for_storage =
-			next_authorities.clone().into_iter().map(|auth| auth.public().into()).collect();
+		for block_number in 1..=num_headers {
+			let mut header = create_header(block_number, previous_hash);
+			let authority_index = (block_number as u32) % (num_authorities as u32);
 
-		for block_number in 1..num_headers + 1 {
-			let mut header = TestHeader::new_from_number(block_number);
-			if let Some(parent_hash) = previous_hash {
-				header.parent_hash = parent_hash;
+			// Add pre-digest
+			add_pre_digest(&mut header, authority_index, block_number);
+
+			// Handle epoch change if needed
+			if epoch_change_at.map_or(false, |change_at| block_number == change_at) {
+				add_epoch_change_digest(&mut header, num_authorities);
+				current_authorities = next_authorities.clone();
 			}
 
-			let authority_index = block_number as u32 % num_authorities as u32;
-			let pre_digest = PrimaryPreDigest {
-				authority_index,
-				slot: block_number.into(),
-				vrf_signature: generate_testing_vrf(),
-			};
-
-			header
-				.digest_mut()
-				.push(DigestItem::babe_pre_digest(PreDigest::Primary(pre_digest.clone())));
-
-			// Add a epoch change digest
-			if let Some(epoch_change_at) = epoch_change_at {
-				if block_number == epoch_change_at {
-					log::info!("Adding epoch change");
-					// Provide fresh authorities. The pre-digest indicates a new epoch, but
-					// the authorities provided are for the next epoch!
-					// We don't really care about the `BabeAuthorityWeight`, so we will
-					// just provide 0.
-					let digest_authorities: Vec<(AuthorityId, BabeAuthorityWeight)> = (0..
-						num_authorities)
-						.map(|_| {
-							let authority_pair: AuthorityPair = Pair::generate().0;
-							(authority_pair.public().into(), Default::default())
-						})
-						.collect();
-					header.digest_mut().push(DigestItem::Consensus(
-						BABE_ENGINE_ID,
-						ConsensusLog::NextEpochData(NextEpochDescriptor {
-							authorities: digest_authorities,
-							randomness: [0; 32],
-						})
-						.encode(),
-					));
-					past_epoch_change = true;
-					authorities = next_authorities.clone();
-				}
-			}
-
-			let header_pre_hash = header.hash();
-			log::info!(
-				"Signing number {} pre-hash {} with authority index {}",
-				header.number(),
-				header_pre_hash,
-				authority_index,
-			);
-			let signature = authorities[authority_index as usize].sign(header_pre_hash.as_bytes());
+			// Sign and seal header
+			let signature =
+				current_authorities[authority_index as usize].sign(header.hash().as_bytes());
 			header.digest_mut().push(DigestItem::babe_seal(signature.into()));
-			previous_hash = Some(header.hash().clone());
-			result.push(header);
+
+			previous_hash = Some(header.hash());
+			headers.push(header);
 		}
-		(result, authorities_for_storage, next_authorities_for_storage)
+
+		(headers, authorities_for_storage, next_authorities_for_storage)
 	}
 
-	const PARA_ID: u32 = 2000;
+	// Helper functions
+	fn generate_authority_pairs(num_authorities: u64) -> (Vec<AuthorityPair>, Vec<AuthorityPair>) {
+		let authorities: Vec<_> = (0..num_authorities).map(|_| Pair::generate().0).collect();
+		let next_authorities: Vec<_> = (0..num_authorities).map(|_| Pair::generate().0).collect();
+		(authorities, next_authorities)
+	}
+
+	fn convert_to_authority_weight_pair(
+		authorities: &[AuthorityPair],
+	) -> Vec<(AuthorityId, BabeAuthorityWeight)> {
+		authorities
+			.iter()
+			.map(|auth| (auth.public().into(), Default::default()))
+			.collect()
+	}
+
+	fn create_header(block_number: u64, previous_hash: Option<H256>) -> TestHeader {
+		let mut header = TestHeader::new_from_number(block_number);
+		if let Some(parent_hash) = previous_hash {
+			header.parent_hash = parent_hash;
+		}
+		header
+	}
+
+	fn add_pre_digest(header: &mut TestHeader, authority_index: u32, block_number: u64) {
+		let pre_digest = PrimaryPreDigest {
+			authority_index,
+			slot: block_number.into(),
+			vrf_signature: generate_testing_vrf(),
+		};
+		header
+			.digest_mut()
+			.push(DigestItem::babe_pre_digest(PreDigest::Primary(pre_digest)));
+	}
+
+	fn add_epoch_change_digest(header: &mut TestHeader, num_authorities: u64) {
+		log::info!("Adding epoch change");
+		let digest_authorities: Vec<(AuthorityId, BabeAuthorityWeight)> = (0..num_authorities)
+			.map(|_| {
+				let authority_pair: AuthorityPair = Pair::generate().0;
+				(authority_pair.public().into(), Default::default())
+			})
+			.collect();
+
+		header.digest_mut().push(DigestItem::Consensus(
+			BABE_ENGINE_ID,
+			ConsensusLog::NextEpochData(NextEpochDescriptor {
+				authorities: digest_authorities,
+				randomness: [0; 32],
+			})
+			.encode(),
+		));
+	}
+
 	/// Verify a header chain with different lengths and different number of authors included in the
 	/// storage proof.
 	#[rstest]
@@ -2161,8 +2168,8 @@ mod tests2 {
 		sp_tracing::try_init_simple();
 		// Arrange
 		let (relay_parent_descendants, authorities, _) =
-			get_header_chain(num_headers, num_authorities, None);
-		let (hash, relay_state_proof) = mock_relay_chain_state_proof(Some(authorities), None);
+			build_relay_parent_descendants(num_headers, num_authorities, None);
+		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
 		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
 			.expect("Should work");
 
@@ -2184,8 +2191,9 @@ mod tests2 {
 	fn test_verify_relay_parent_broken_state_root() {
 		sp_tracing::try_init_simple();
 		// Arrange
-		let (relay_parent_descendants, authorities, _) = get_header_chain(10, 10, None);
-		let (hash, relay_state_proof) = mock_relay_chain_state_proof(Some(authorities), None);
+		let (relay_parent_descendants, authorities, _) =
+			build_relay_parent_descendants(10, 10, None);
+		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
 		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
 			.expect("Should work");
 
@@ -2213,8 +2221,9 @@ mod tests2 {
 	fn test_incorrect_number_of_headers(#[case] expected_number_of_descendants: u32) {
 		sp_tracing::try_init_simple();
 		// Arrange
-		let (relay_parent_descendants, authorities, _) = get_header_chain(10, 10, None);
-		let (hash, relay_state_proof) = mock_relay_chain_state_proof(Some(authorities), None);
+		let (relay_parent_descendants, authorities, _) =
+			build_relay_parent_descendants(10, 10, None);
+		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
 		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
 			.expect("Should work");
 
@@ -2232,9 +2241,9 @@ mod tests2 {
 	#[rstest]
 	#[should_panic = "No authorities delivered in state proof!"]
 	fn test_authorities_missing() {
-		let (relay_parent_descendants, _, _) = get_header_chain(10, 10, None);
+		let (relay_parent_descendants, _, _) = build_relay_parent_descendants(10, 10, None);
 		// No authorities, this is bad!
-		let (hash, relay_state_proof) = mock_relay_chain_state_proof(None, None);
+		let (hash, relay_state_proof) = build_relay_chain_storage_proof(None, None);
 		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
 			.expect("Should work");
 
@@ -2254,11 +2263,12 @@ mod tests2 {
 	#[rstest]
 	#[should_panic]
 	fn test_relay_parents_do_not_form_chain() {
-		let (mut relay_parent_descendants, authorities, _) = get_header_chain(10, 10, None);
+		let (mut relay_parent_descendants, authorities, _) =
+			build_relay_parent_descendants(10, 10, None);
 		// Parent hash does not point to the proper parent, incomplete chain
 		relay_parent_descendants.get_mut(2).expect("Parent is available").parent_hash =
 			H256::repeat_byte(0x9);
-		let (hash, relay_state_proof) = mock_relay_chain_state_proof(Some(authorities), None);
+		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
 		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
 			.expect("Should work");
 
@@ -2278,7 +2288,8 @@ mod tests2 {
 	#[rstest]
 	#[should_panic = "Bad Signature on relay parent descendant #"]
 	fn test_relay_parent_with_wrong_signature() {
-		let (mut relay_parent_descendants, authorities, _) = get_header_chain(10, 10, None);
+		let (mut relay_parent_descendants, authorities, _) =
+			build_relay_parent_descendants(10, 10, None);
 
 		// Pop the seal of the last descendant and put some invalid signature into the digests
 		let rp_to_modify = relay_parent_descendants.last_mut().expect("Parent is available");
@@ -2287,7 +2298,7 @@ mod tests2 {
 			Sr25519Keyring::Alice.sign(b"Not the signature you are looking for.");
 		rp_to_modify.digest_mut().push(DigestItem::babe_seal(invalid_signature.into()));
 
-		let (hash, relay_state_proof) = mock_relay_chain_state_proof(Some(authorities), None);
+		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
 		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
 			.expect("Should work");
 
@@ -2309,8 +2320,9 @@ mod tests2 {
 	fn test_verify_relay_parent_descendants_missing_next_authorities_with_epoch_change() {
 		sp_tracing::try_init_simple();
 		// Arrange
-		let (relay_parent_descendants, authorities, _) = get_header_chain(10, 10, Some(5));
-		let (hash, relay_state_proof) = mock_relay_chain_state_proof(Some(authorities), None);
+		let (relay_parent_descendants, authorities, _) =
+			build_relay_parent_descendants(10, 10, Some(5));
+		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
 		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
 			.expect("Should work");
 
@@ -2335,9 +2347,9 @@ mod tests2 {
 		sp_tracing::try_init_simple();
 		// Arrange
 		let (relay_parent_descendants, authorities, next_authorities) =
-			get_header_chain(num_headers, num_authorities, Some(5));
+			build_relay_parent_descendants(num_headers, num_authorities, Some(5));
 		let (hash, relay_state_proof) =
-			mock_relay_chain_state_proof(Some(authorities), Some(next_authorities));
+			build_relay_chain_storage_proof(Some(authorities), Some(next_authorities));
 		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
 			.expect("Should work");
 
