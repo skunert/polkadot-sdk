@@ -98,6 +98,10 @@ pub enum Error {
 	HrmpChannel(ParaId, ParaId, ReadEntryErr),
 	/// The latest included parachain head cannot be extracted.
 	ParaHead(ReadEntryErr),
+	/// The relay chain authorities cannot be extracted
+	Authorities(ReadEntryErr),
+	/// The relay chain authorities for the next epoch cannot be extracted
+	NextAuthorities(ReadEntryErr),
 }
 
 #[derive(Debug)]
@@ -298,7 +302,7 @@ impl RelayChainStateProof {
 	) -> Result<Vec<(sp_consensus_babe::AuthorityId, sp_consensus_babe::BabeAuthorityWeight)>, Error>
 	{
 		read_entry(&self.trie_backend, &relay_chain::well_known_keys::AUTHORITIES, None)
-			.map_err(Error::ParaHead)
+			.map_err(Error::Authorities)
 	}
 
 	pub fn read_next_authorities(
@@ -308,7 +312,7 @@ impl RelayChainStateProof {
 		Error,
 	> {
 		read_optional_entry(&self.trie_backend, &relay_chain::well_known_keys::NEXT_AUTHORITIES)
-			.map_err(Error::ParaHead)
+			.map_err(Error::NextAuthorities)
 	}
 
 	/// Read the [`Slot`](relay_chain::Slot) from the relay chain state proof.
