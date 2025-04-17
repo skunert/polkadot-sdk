@@ -41,7 +41,7 @@ use crate::{
 	},
 	LOG_TARGET,
 };
-use cumulus_pallet_aura_ext::RelayParentAgeApi;
+use cumulus_primitives_core::RelayParentOffsetApi;
 use futures::prelude::*;
 use sc_client_api::{backend::AuxStore, BlockBackend, BlockOf, UsageProvider};
 use sc_consensus::BlockImport;
@@ -126,7 +126,7 @@ where
 		+ 'static,
 	Client::Api: AuraApi<Block, P::Public>
 		+ GetCoreSelectorApi<Block>
-		+ RelayParentAgeApi<Block>
+		+ RelayParentOffsetApi<Block>
 		+ AuraUnincludedSegmentApi<Block>,
 	Backend: sc_client_api::Backend<Block> + 'static,
 	RelayClient: RelayChainInterface + Clone + 'static,
@@ -196,7 +196,7 @@ where
 			let best_hash = para_client.info().best_hash;
 			let relay_parent_offset = if para_client
 				.runtime_api()
-				.has_api::<dyn RelayParentAgeApi<Block>>(best_hash)
+				.has_api::<dyn RelayParentOffsetApi<Block>>(best_hash)
 				.is_ok_and(|has_api| has_api)
 			{
 				para_client.runtime_api().slot_offset(best_hash).unwrap_or_default()

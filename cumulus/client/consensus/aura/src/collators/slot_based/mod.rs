@@ -73,9 +73,10 @@ use consensus_common::ParachainCandidate;
 use cumulus_client_collator::service::ServiceInterface as CollatorServiceInterface;
 use cumulus_client_consensus_common::{self as consensus_common, ParachainBlockImportMarker};
 use cumulus_client_consensus_proposer::ProposerInterface;
-use cumulus_pallet_aura_ext::RelayParentAgeApi;
 use cumulus_primitives_aura::AuraUnincludedSegmentApi;
-use cumulus_primitives_core::{ClaimQueueOffset, CoreSelector, GetCoreSelectorApi};
+use cumulus_primitives_core::{
+	ClaimQueueOffset, CoreSelector, GetCoreSelectorApi, RelayParentOffsetApi,
+};
 use cumulus_relay_chain_interface::RelayChainInterface;
 use futures::FutureExt;
 use polkadot_primitives::{
@@ -165,7 +166,7 @@ pub fn run<Block, P, BI, CIDP, Client, Backend, RClient, CHP, Proposer, CS, Spaw
 	Client::Api: AuraApi<Block, P::Public>
 		+ GetCoreSelectorApi<Block>
 		+ AuraUnincludedSegmentApi<Block>
-		+ RelayParentAgeApi<Block>,
+		+ RelayParentOffsetApi<Block>,
 	Backend: sc_client_api::Backend<Block> + 'static,
 	RClient: RelayChainInterface + Clone + 'static,
 	CIDP: CreateInherentDataProviders<Block, ()> + 'static,

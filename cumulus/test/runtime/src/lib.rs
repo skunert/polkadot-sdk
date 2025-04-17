@@ -497,7 +497,7 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl cumulus_pallet_aura_ext::RelayParentAgeApi<Block> for Runtime {
+	impl cumulus_primitives_core::RelayParentOffsetApi<Block> for Runtime {
 		fn slot_offset() -> u32 {
 			RELAY_PARENT_OFFSET
 		}

@@ -49,17 +49,6 @@ type Aura<T> = pallet_aura::Pallet<T>;
 
 pub use pallet::*;
 
-sp_api::decl_runtime_apis! {
-	/// API to tell the node side how the relay parent should be chosen.
-	///
-	/// A larger offset indicates that the relay parent should not be the tip of the relay chain,
-	/// but `N` blocks behind the tip. This offset is then enforced by the runtime.
-	pub trait RelayParentAgeApi {
-		/// Fetch the slot offset that is expected from the relay chain.
-		fn slot_offset() -> u32;
-	}
-}
-
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
