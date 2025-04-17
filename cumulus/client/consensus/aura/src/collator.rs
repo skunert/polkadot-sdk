@@ -117,20 +117,24 @@ where
 		}
 	}
 
+	/// Explicitly creates the inherent data for parachain block authoring and overrides
+	/// the timestamp inherent data with the one provided, if any. Additionally allows to specify
+	/// relay parent descendants that can be used to prevent authoring at the tip of the relay
+	/// chain.
 	pub async fn create_inherent_data_with_rp_offset(
 		&self,
 		relay_parent: PHash,
 		validation_data: &PersistedValidationData,
 		parent_hash: Block::Hash,
 		timestamp: impl Into<Option<Timestamp>>,
-		required_rp_ancestry: Vec<RelayHeader>,
+		relay_parent_descendants: Vec<RelayHeader>,
 	) -> Result<(ParachainInherentData, InherentData), Box<dyn Error + Send + Sync + 'static>> {
 		let paras_inherent_data = ParachainInherentDataProvider::create_at(
 			relay_parent,
 			&self.relay_client,
 			validation_data,
 			self.para_id,
-			required_rp_ancestry,
+			relay_parent_descendants,
 		)
 		.await;
 

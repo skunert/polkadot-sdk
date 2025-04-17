@@ -46,8 +46,8 @@ pub(crate) fn verify_relay_parent_descendants<H: Header>(
 	if relay_parent_descendants.len() != (expected_number_of_parents + 1) as usize {
 		panic!(
             "Expected {} descendants of relay parent in `set_validation_data` inherent, received {}.",
+            expected_number_of_parents + 1,
             relay_parent_descendants.len(),
-            expected_number_of_parents
         );
 	}
 

@@ -58,6 +58,10 @@ async fn slot_based_3cores_test() -> Result<(), anyhow::Error> {
 				])
 				.with_collator(|n| n.with_name("collator-rp-offset"))
 		})
+		.with_global_settings(|global_settings| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
+			Ok(val) => global_settings.with_base_dir(val),
+			_ => global_settings,
+		})
 		.build()
 		.map_err(|e| {
 			let errs = e.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(" ");

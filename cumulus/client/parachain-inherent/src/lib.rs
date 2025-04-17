@@ -39,6 +39,7 @@ async fn collect_relay_storage_proof(
 	relay_chain_interface: &impl RelayChainInterface,
 	para_id: ParaId,
 	relay_parent: PHash,
+	include_authorities: bool,
 	include_next_authorities: bool,
 ) -> Option<sp_state_machine::StorageProof> {
 	use relay_chain::well_known_keys as relay_well_known_keys;
@@ -102,7 +103,6 @@ async fn collect_relay_storage_proof(
 
 	let mut relevant_keys = vec![
 		relay_well_known_keys::CURRENT_BLOCK_RANDOMNESS.to_vec(),
-		relay_well_known_keys::AUTHORITIES.to_vec(),
 		relay_well_known_keys::ONE_EPOCH_AGO_RANDOMNESS.to_vec(),
 		relay_well_known_keys::TWO_EPOCHS_AGO_RANDOMNESS.to_vec(),
 		relay_well_known_keys::CURRENT_SLOT.to_vec(),
@@ -127,6 +127,10 @@ async fn collect_relay_storage_proof(
 	relevant_keys.extend(egress_channels.into_iter().map(|recipient| {
 		relay_well_known_keys::hrmp_channels(HrmpChannelId { sender: para_id, recipient })
 	}));
+
+	if include_authorities {
+		relevant_keys.push(relay_well_known_keys::AUTHORITIES.to_vec());
+	}
 
 	if include_next_authorities {
 		tracing::info!("Including next authorities in state proof");
@@ -158,9 +162,11 @@ impl ParachainInherentDataProvider {
 		relay_chain_interface: &impl RelayChainInterface,
 		validation_data: &PersistedValidationData,
 		para_id: ParaId,
-		required_rp_ancestry: Vec<RelayHeader>,
+		relay_parent_descendants: Vec<RelayHeader>,
 	) -> Option<ParachainInherentData> {
-		let include_next_authorities = required_rp_ancestry.iter().skip(1).any(|header| {
+		// Only include next epoch authorities when the descendants include an epoch digest.
+		// Skip the first entry because this is the relay parent itself.
+		let include_next_authorities = relay_parent_descendants.iter().skip(1).any(|header| {
 			sc_consensus_babe::find_next_epoch_digest::<RelayBlock>(header)
 				.ok()
 				.flatten()
@@ -170,6 +176,7 @@ impl ParachainInherentDataProvider {
 			relay_chain_interface,
 			para_id,
 			relay_parent,
+			!relay_parent_descendants.is_empty(),
 			include_next_authorities,
 		)
 		.await?;
@@ -199,13 +206,13 @@ impl ParachainInherentDataProvider {
 			})
 			.ok()?;
 
-		tracing::info!(target: "skunert", ?required_rp_ancestry, "Creating parachain inherent with extra relay parents.");
+		tracing::debug!(target: "skunert", ?relay_parent_descendants, "Creating parachain inherent with extra relay parents.");
 		Some(ParachainInherentData {
 			downward_messages,
 			horizontal_messages,
 			validation_data: validation_data.clone(),
 			relay_chain_state,
-			relay_parent_descendants: required_rp_ancestry,
+			relay_parent_descendants,
 		})
 	}
 }
