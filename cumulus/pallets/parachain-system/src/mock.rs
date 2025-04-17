@@ -38,10 +38,10 @@ use frame_support::{
 	weights::{Weight, WeightMeter},
 };
 use frame_system::{pallet_prelude::BlockNumberFor, RawOrigin};
+use sp_core::ConstU32;
 use sp_runtime::{traits::BlakeTwo256, BuildStorage};
 use sp_version::RuntimeVersion;
 use std::cell::RefCell;
-use sp_core::ConstU32;
 
 use crate as parachain_system;
 use crate::consensus_hook::UnincludedSegmentCapacity;
@@ -421,7 +421,7 @@ impl BlockTests {
 					relay_chain_state,
 					downward_messages: Default::default(),
 					horizontal_messages: Default::default(),
-					relay_parent_descendants: Default::default()
+					relay_parent_descendants: Default::default(),
 				};
 				if let Some(ref hook) = self.inherent_data_hook {
 					hook(self, relay_parent_number, &mut system_inherent_data);
