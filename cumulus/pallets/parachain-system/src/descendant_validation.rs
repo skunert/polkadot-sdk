@@ -1,8 +1,7 @@
 use crate::RelayChainStateProof;
-use codec::Decode;
-use cumulus_primitives_core::relay_chain;
+use alloc::vec::Vec;
 use sp_consensus_babe::{
-	digests::{CompatibleDigestItem, NextEpochDescriptor, PreDigest, SecondaryPlainPreDigest},
+	digests::{CompatibleDigestItem, NextEpochDescriptor, PreDigest},
 	AuthorityPair,
 };
 use sp_core::Pair;
@@ -83,7 +82,7 @@ pub(crate) fn verify_relay_parent_descendants<H: Header>(
 		// Verify that the blocks actually form a chain
 		if let Some(ref expected_hash) = next_expected_hash {
 			if current_header.parent_hash() != expected_hash {
-				panic!("Expected {expected_hash:?} (#{relay_number}), but found {sealed_header_hash:?}.");
+				panic!("Expected {expected_hash:?} (#{relay_number:?}), but found {sealed_header_hash:?}.");
 			}
 		}
 		next_expected_hash = Some(sealed_header_hash.clone());
@@ -102,7 +101,7 @@ pub(crate) fn verify_relay_parent_descendants<H: Header>(
 			if counter != 0 {
 				let Some(next_authorities) = maybe_next_authorities else {
 					panic!(
-                        "Relay parent descendant #{relay_number:?}({sealed_header_hash:?}) contains \
+                        "Relay parent descendant #{relay_number:?} ({sealed_header_hash:?}) contains \
 						epoch change, but no authorities where provided for the next epoch."
                     );
 				};
@@ -177,7 +176,8 @@ pub fn find_babe_pre_digest<H: Header>(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use codec::Encode;
+	use codec::{Decode, Encode};
+	use cumulus_primitives_core::relay_chain;
 	use cumulus_test_relay_sproof_builder::RelayStateSproofBuilder;
 	use pallet_message_queue::mock_helpers::IntoWeight;
 	use rand::random;
@@ -195,20 +195,17 @@ mod tests {
 	use sp_trie::StorageProof;
 
 	const PARA_ID: u32 = 2000;
-	/// Verify a header chain with different lengths and different number of authors included in the
-	/// storage proof.
+
+	/// Verify a header chain with different lengths and different number of authorities included in
+	/// the storage proof.
 	#[rstest]
 	fn test_verify_relay_parent_descendants_happy_case(
 		#[values(1, 2, 3, 4, 100)] num_headers: u64,
 		#[values(1, 3, 100, 1000)] num_authorities: u64,
 	) {
-		sp_tracing::try_init_simple();
-		// Arrange
 		let (relay_parent_descendants, authorities, _) =
 			build_relay_parent_descendants(num_headers, num_authorities, None);
-		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
+		let relay_state_proof = build_relay_chain_storage_proof(Some(authorities), None);
 
 		// Make sure that the first relay parent has the correct state root set
 		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
@@ -226,13 +223,9 @@ mod tests {
 	#[rstest]
 	#[should_panic = "Relay parent provided in inherent has different state root than expected!expected: 0x0000000000000000000000000000000000000000000000000000000000000000 found: 0x0909090909090909090909090909090909090909090909090909090909090909"]
 	fn test_verify_relay_parent_broken_state_root() {
-		sp_tracing::try_init_simple();
-		// Arrange
 		let (relay_parent_descendants, authorities, _) =
 			build_relay_parent_descendants(10, 10, None);
-		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
+		let relay_state_proof = build_relay_chain_storage_proof(Some(authorities), None);
 
 		// Set a erroneous state root
 		let relay_parent_state_root = H256::repeat_byte(0x9);
@@ -256,13 +249,9 @@ mod tests {
 	#[case::too_many_2(100)]
 	#[should_panic]
 	fn test_incorrect_number_of_headers(#[case] expected_number_of_descendants: u32) {
-		sp_tracing::try_init_simple();
-		// Arrange
 		let (relay_parent_descendants, authorities, _) =
 			build_relay_parent_descendants(10, 10, None);
-		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
+		let relay_state_proof = build_relay_chain_storage_proof(Some(authorities), None);
 
 		// Make sure that the first relay parent has the correct state root set
 		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
@@ -280,9 +269,7 @@ mod tests {
 	fn test_authorities_missing() {
 		let (relay_parent_descendants, _, _) = build_relay_parent_descendants(10, 10, None);
 		// No authorities, this is bad!
-		let (hash, relay_state_proof) = build_relay_chain_storage_proof(None, None);
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
+		let relay_state_proof = build_relay_chain_storage_proof(None, None);
 
 		// Make sure that the first relay parent has the correct state root set
 		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
@@ -305,9 +292,7 @@ mod tests {
 		// Parent hash does not point to the proper parent, incomplete chain
 		relay_parent_descendants.get_mut(2).expect("Parent is available").parent_hash =
 			H256::repeat_byte(0x9);
-		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
+		let relay_state_proof = build_relay_chain_storage_proof(Some(authorities), None);
 
 		// Make sure that the first relay parent has the correct state root set
 		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
@@ -335,9 +320,7 @@ mod tests {
 			Sr25519Keyring::Alice.sign(b"Not the signature you are looking for.");
 		rp_to_modify.digest_mut().push(DigestItem::babe_seal(invalid_signature.into()));
 
-		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
+		let relay_state_proof = build_relay_chain_storage_proof(Some(authorities), None);
 
 		// Make sure that the first relay parent has the correct state root set
 		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
@@ -353,15 +336,12 @@ mod tests {
 	}
 
 	#[rstest]
-	#[should_panic]
+	#[should_panic = "contains epoch change, but no authorities where provided for the next epoch."]
 	fn test_verify_relay_parent_descendants_missing_next_authorities_with_epoch_change() {
 		sp_tracing::try_init_simple();
-		// Arrange
 		let (relay_parent_descendants, authorities, _) =
 			build_relay_parent_descendants(10, 10, Some(5));
-		let (hash, relay_state_proof) = build_relay_chain_storage_proof(Some(authorities), None);
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
+		let relay_state_proof = build_relay_chain_storage_proof(Some(authorities), None);
 
 		// Make sure that the first relay parent has the correct state root set
 		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
@@ -382,13 +362,10 @@ mod tests {
 		#[values(1, 3, 100, 1000)] num_authorities: u64,
 	) {
 		sp_tracing::try_init_simple();
-		// Arrange
 		let (relay_parent_descendants, authorities, next_authorities) =
 			build_relay_parent_descendants(num_headers, num_authorities, Some(5));
-		let (hash, relay_state_proof) =
+		let relay_state_proof =
 			build_relay_chain_storage_proof(Some(authorities), Some(next_authorities));
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
 
 		// Make sure that the first relay parent has the correct state root set
 		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
@@ -410,13 +387,10 @@ mod tests {
 		#[values(0, 5, 10)] epoch_change_position: u64,
 	) {
 		sp_tracing::try_init_simple();
-		// Arrange
 		let (relay_parent_descendants, authorities, next_authorities) =
 			build_relay_parent_descendants(10, 10, Some(epoch_change_position));
-		let (hash, relay_state_proof) =
+		let relay_state_proof =
 			build_relay_chain_storage_proof(Some(authorities), Some(next_authorities));
-		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
-			.expect("Should work");
 
 		// Make sure that the first relay parent has the correct state root set
 		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
@@ -435,7 +409,7 @@ mod tests {
 	fn build_relay_chain_storage_proof(
 		authorities: Option<Vec<(AuthorityId, BabeAuthorityWeight)>>,
 		next_authorities: Option<Vec<(AuthorityId, BabeAuthorityWeight)>>,
-	) -> (H256, StorageProof) {
+	) -> RelayChainStateProof {
 		// Create a mock implementation or structure, adjust this to match the proof's definition
 		let mut proof_builder = RelayStateSproofBuilder::default();
 		if let Some(authorities) = authorities {
@@ -450,7 +424,8 @@ mod tests {
 				next_authorities.encode(),
 			));
 		}
-		proof_builder.into_state_root_and_proof()
+		let (hash, relay_storage_proof) = proof_builder.into_state_root_and_proof();
+		RelayChainStateProof::new(PARA_ID.into(), hash, relay_storage_proof).unwrap()
 	}
 
 	/// This method generates some vrf data, but only to make the compiler happy.
@@ -549,7 +524,6 @@ mod tests {
 	}
 
 	fn add_epoch_change_digest(header: &mut TestHeader, num_authorities: u64) {
-		log::info!("Adding epoch change");
 		let digest_authorities: Vec<(AuthorityId, BabeAuthorityWeight)> = (0..num_authorities)
 			.map(|_| {
 				let authority_pair: AuthorityPair = Pair::generate().0;
