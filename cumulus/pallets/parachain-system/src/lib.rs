@@ -647,7 +647,6 @@ pub mod pallet {
 			)
 			.expect("Invalid relay chain state proof");
 
-			log::info!(target: "skunert", "Runtime here: Received extra relay parents: {}, {:?}", relay_parent_descendants.len(), relay_parent_descendants);
 			let expected_number_of_parents = T::RelayParentOffset::get();
 
 			if expected_number_of_parents > 0 {
