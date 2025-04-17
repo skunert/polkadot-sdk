@@ -78,6 +78,7 @@ pub mod consensus_hook;
 pub mod relay_state_snapshot;
 #[macro_use]
 pub mod validate_block;
+mod descendant_validation;
 
 use unincluded_segment::{
 	HrmpChannelUpdate, HrmpWatermarkUpdate, OutboundBandwidthLimits, SegmentTracker,
@@ -660,16 +661,18 @@ pub mod pallet {
             );
 		}
 
-		let Ok(relay_authorities) = relay_state_proof.read_authorities() else {
+		let Ok(mut current_authorities) = relay_state_proof.read_authorities() else {
 			panic!("No authorities delivered in state proof!");
 		};
+		let mut maybe_next_authorities = relay_state_proof.read_next_authorities().ok().flatten();
 
 		let mut next_expected_hash = None;
 
-		let next_authorities = relay_state_proof.read_next_authorities().ok().flatten();
 		let mut required_next_authorities = false;
-		let mut epoch_change_was_seen = false;
 
+		// Verify that the state root of the first block is the same as the one
+		// from the relay parent. In the PVF, we don't have the relay parent header hash
+		// available, so we need to use the storage root here to establish a chain.
 		if let Some(relay_parent) = relay_parent_descendants.get(0) {
 			if *relay_parent.state_root() != relay_parent_state_root {
 				panic!(
@@ -681,56 +684,61 @@ pub mod pallet {
 			}
 		};
 
-		for mut parent in relay_parent_descendants.into_iter() {
+		for (counter, mut current_header) in relay_parent_descendants.into_iter().enumerate() {
 			// Hash calculated while seal is intact
-			let sealed_header_hash = parent.hash();
-			let relay_number = parent.number().clone();
+			let sealed_header_hash = current_header.hash();
+			let relay_number = current_header.number().clone();
 
 			// Verify that the blocks actually form a chain
 			if let Some(ref expected_hash) = next_expected_hash {
-				if parent.parent_hash() != expected_hash {
+				if current_header.parent_hash() != expected_hash {
 					panic!("Expected {expected_hash:?} (#{relay_number}), but found {sealed_header_hash:?}.");
 				}
 			}
 			next_expected_hash = Some(sealed_header_hash.clone());
 
 			log::debug!(target: LOG_TARGET, "Validating header #{relay_number:?} ({sealed_header_hash:?})");
-			let Ok((pre_digest, next_epoch_descriptor)) = find_babe_pre_digest(&parent) else {
+			let Ok((pre_digest, next_epoch_descriptor)) = find_babe_pre_digest(&current_header)
+			else {
 				panic!("Relay header without predigest");
 			};
 
 			let authority_index = pre_digest.authority_index() as usize;
 			// Once we have seen a next epoch descriptor, we must always use the authorities of the
-			// next epoch.
-			if next_epoch_descriptor.is_some() {
-				epoch_change_was_seen = true;
+			// next epoch.If the relay parent contains epoch descriptor, we shall not rotate
+			// authorities. As in that case the authorities in the state proof reflect the
+			// new authorities already.
+			if let Some(descriptor) = next_epoch_descriptor {
+				if counter != 0 {
+					let Some(next_authorities) = maybe_next_authorities else {
+						panic!(
+							"Relay parent descendant #{relay_number:?}({sealed_header_hash:?}) contains \
+						epoch change, but no authorities where provided for the next epoch."
+						);
+					};
+					log::debug!(
+						target: LOG_TARGET,
+						"Header {sealed_header_hash:?} contains epoch change! \
+						Using next authority set to verify signatures going forward."
+					);
+					// Rotate authorities, all headers following are to
+					// be verified against the new authorities. The authorities for the next epoch
+					// have been signed by a current authority, we can use it for further epochs.
+					current_authorities = next_authorities;
+					maybe_next_authorities = Some(descriptor.authorities);
+					required_next_authorities = true;
+				}
 			}
 
-			let authority_id = if epoch_change_was_seen {
-				log::debug!(
-					target: LOG_TARGET,
-					"Header {sealed_header_hash:?} is in next epoch! \
-					Using next authority set to verify signature."
-				);
-				let Some(ref next_epoch_authorities) = next_authorities else {
-					panic!(
-                        "Relay parent descendant #{relay_number:?}({sealed_header_hash:?}) contains \
-						epoch change, but no authorities where provided for the next epoch."
-                    );
-				};
-				required_next_authorities = true;
-				&next_epoch_authorities[authority_index].0
-			} else {
-				&relay_authorities[authority_index].0
-			};
-			let seal = parent
+			let authority_id = &current_authorities[authority_index].0;
+			let seal = current_header
 				.digest_mut()
 				.pop()
 				.expect("Valid relay chain block will always contain a seal.");
 			let signature =
 				seal.as_babe_seal().expect("Valid relay chain seal can be cast to signature.");
 
-			if !AuthorityPair::verify(&signature, parent.hash(), authority_id) {
+			if !AuthorityPair::verify(&signature, current_header.hash(), authority_id) {
 				panic!(
                     "Bad Signature on relay parent descendant #{relay_number:?} ({sealed_header_hash:?})."
                 )
@@ -741,9 +749,9 @@ pub mod pallet {
 		// There was no session change announced in the relay parent descendants.
 		// However, the node side provided the next authorities in the inherent state proof.
 		// This wastes some PoV space and indicates a bug in the node.
-		if !required_next_authorities && next_authorities.is_some() {
+		if !required_next_authorities && maybe_next_authorities.is_some() {
 			log::warn!(
-				"There was no session change in the relay parent or its descendants, \
+				"There was no epoch change in the relay parent or its descendants, \
 				but next authority was part of the storage proof. This wastes PoV space."
 			);
 		}
@@ -2079,7 +2087,7 @@ mod tests2 {
 		let mut current_authorities = authorities.clone();
 		let mut previous_hash = None;
 
-		for block_number in 1..=num_headers {
+		for block_number in 0..=num_headers - 1 {
 			let mut header = create_header(block_number, previous_hash);
 			let authority_index = (block_number as u32) % (num_authorities as u32);
 
@@ -2089,7 +2097,9 @@ mod tests2 {
 			// Handle epoch change if needed
 			if epoch_change_at.map_or(false, |change_at| block_number == change_at) {
 				add_epoch_change_digest(&mut header, num_authorities);
-				current_authorities = next_authorities.clone();
+				if block_number > 0 {
+					current_authorities = next_authorities.clone();
+				}
 			}
 
 			// Sign and seal header
@@ -2366,10 +2376,31 @@ mod tests2 {
 		);
 	}
 
+	/// Test some interesting epoch change positions, like epoch change on RP directly, and last
+	/// block.
 	#[rstest]
-	fn test_verify_backward_compatibility(
-		#[values(10)] num_headers: u64,
-		#[values(10)] num_authorities: u64,
+	fn test_verify_relay_parent_with_epoch_change_at_positions(
+		#[values(0, 5, 10)] epoch_change_position: u64,
 	) {
+		sp_tracing::try_init_simple();
+		// Arrange
+		let (relay_parent_descendants, authorities, next_authorities) =
+			build_relay_parent_descendants(10, 10, Some(epoch_change_position));
+		let (hash, relay_state_proof) =
+			build_relay_chain_storage_proof(Some(authorities), Some(next_authorities));
+		let relay_state_proof = RelayChainStateProof::new(PARA_ID.into(), hash, relay_state_proof)
+			.expect("Should work");
+
+		// Make sure that the first relay parent has the correct state root set
+		let relay_parent_state_root = relay_parent_descendants.get(0).unwrap().state_root.clone();
+		// Expected number of parents passed to the function does not include actual relay parent
+		let expected_number_of_descendants = (relay_parent_descendants.len() - 1) as u32;
+
+		verify_relay_parent_descendants(
+			&relay_state_proof,
+			relay_parent_descendants,
+			relay_parent_state_root,
+			expected_number_of_descendants,
+		);
 	}
 }
