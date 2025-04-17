@@ -16,7 +16,7 @@ use subxt_signer::sr25519::dev;
 use zombienet_sdk::NetworkConfigBuilder;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn slot_based_3cores_test() -> Result<(), anyhow::Error> {
+async fn slot_based_relay_parent_offset_test() -> Result<(), anyhow::Error> {
 	let _ = env_logger::try_init_from_env(
 		env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
 	);
