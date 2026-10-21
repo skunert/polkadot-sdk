@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Speculative messaging on JAM · walkthrough</title>
+	<link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+<main>
+<svg id="scene" viewBox="0 0 1200 820" preserveAspectRatio="xMidYMid meet">
+	<!-- Motion paths. Invisible; tokens travel along them. -->
+	<g id="paths" fill="none" stroke="none">
+		<path id="pA1" d="M434,70 C434,220 290,250 290,395" />
+		<path id="pA2" d="M290,395 C290,500 580,480 580,560" />
+		<path id="pA3" d="M580,560 L580,660" />
+		<path id="pA4" d="M580,660 C420,560 100,530 80,612" />
+		<path id="pB1" d="M1054,70 C1054,220 910,250 910,395" />
+		<path id="pB2" d="M910,395 C910,500 580,480 580,560" />
+		<path id="pB3" d="M580,560 L580,660" />
+		<path id="pB4" d="M580,660 C740,560 860,530 880,612" />
+		<path id="pReq" d="M530,383 L670,383" />
+		<path id="pResp" d="M655,410 L545,410" />
+		<path id="pInh" d="M290,395 L290,335" />
+		<path id="pTx1" d="M1100,395 L910,395" />
+		<path id="pTx2" d="M910,395 L910,335" />
+		<path id="pA5" d="M580,660 C420,560 144,530 124,612" />
+		<path id="pB5" d="M580,660 C740,560 904,530 924,612" />
+		<path id="pMReq" d="M670,383 L530,383" />
+		<path id="pMResp" d="M545,410 L655,410" />
+	</g>
+
+	<!-- ───────────── Parachain A ─────────────
+	     Same template in both boxes: header with StreamsRoot, then one
+	     "Channel A→B" section whose rows are the channel's two streams. -->
+	<g id="chainA" class="chain a">
+		<rect class="box" x="30" y="30" width="520" height="280" rx="14" />
+		<text class="title" x="50" y="64">Parachain A</text>
+		<text class="sub" x="186" y="64">sender</text>
+		<g id="a-block" class="pill amber" transform="translate(500,30)" style="opacity:0">
+			<rect x="-31" y="-11" width="62" height="22" rx="11" />
+			<text y="4" text-anchor="middle">block N</text>
+		</g>
+		<g id="a-block-ok" class="pill green" transform="translate(500,30)" style="opacity:0">
+			<rect x="-32" y="-11" width="64" height="22" rx="11" />
+			<text class="tight" y="4" text-anchor="middle">block N ✓</text>
+		</g>
+
+		<text class="label" x="388" y="62" text-anchor="end">StreamsRoot</text>
+		<g transform="translate(434,57)">
+			<g id="a-root-pill" class="pill root">
+				<rect x="-36" y="-13" width="72" height="26" rx="13" />
+				<text id="a-root-0" class="mono dim" text-anchor="middle" y="5">—</text>
+				<text id="a-root-1" class="mono" text-anchor="middle" y="5" style="opacity:0">T<tspan class="subs" dy="3">A1</tspan></text>
+				<text id="a-root-2" class="mono" text-anchor="middle" y="5" style="opacity:0">T<tspan class="subs" dy="3">A2</tspan></text>
+			</g>
+		</g>
+		<text id="a-digest" class="caption-s" x="434" y="84" text-anchor="middle" style="opacity:0">in header digest</text>
+
+		<text class="ch-title" x="50" y="104">Channel A→B<tspan class="ch-tag" dx="12">domain 0 · num 0</tspan></text>
+		<g id="a-phase-opening" style="opacity:0">
+			<g class="pill amber" transform="translate(350,100)">
+				<rect x="-42" y="-11" width="84" height="22" rx="11" />
+				<text y="4" text-anchor="middle">Opening</text>
+			</g>
+		</g>
+		<g id="a-phase-open" style="opacity:0">
+			<g class="pill green" transform="translate(350,100)">
+				<rect x="-42" y="-11" width="84" height="22" rx="11" />
+				<text y="4" text-anchor="middle">Open</text>
+			</g>
+		</g>
+
+		<!-- data row: A writes -->
+		<text class="row-label" x="50" y="143">writes</text>
+		<g class="chip data"><rect x="92" y="129" width="44" height="20" rx="10" /><text x="114" y="143" text-anchor="middle">data</text></g>
+		<g class="slots">
+			<rect x="150" y="118" width="48" height="40" rx="6" />
+			<rect x="204" y="118" width="48" height="40" rx="6" />
+			<rect x="258" y="118" width="48" height="40" rx="6" />
+			<rect x="312" y="118" width="48" height="40" rx="6" />
+			<rect x="366" y="118" width="48" height="40" rx="6" />
+			<rect x="420" y="118" width="48" height="40" rx="6" />
+		</g>
+		<g id="a-leaf0" class="leaf" style="opacity:0">
+			<rect x="150" y="118" width="48" height="40" rx="6" />
+			<text x="174" y="143" text-anchor="middle">OpenCh</text>
+		</g>
+		<g id="a-leaf1" class="leaf pending" style="opacity:0">
+			<rect x="204" y="118" width="48" height="40" rx="6" />
+			<text x="228" y="143" text-anchor="middle">m₁</text>
+		</g>
+		<g id="a-leaf2" class="leaf pending" style="opacity:0">
+			<rect x="258" y="118" width="48" height="40" rx="6" />
+			<text x="282" y="143" text-anchor="middle">m₂</text>
+		</g>
+		<g id="a-split" style="opacity:0">
+			<line class="split" x1="152" y1="165" x2="196" y2="165" />
+			<text class="split-label" x="174" y="179" text-anchor="middle">frontier</text>
+			<line class="split pending" x1="206" y1="165" x2="304" y2="165" />
+			<text class="split-label" x="255" y="179" text-anchor="middle">this block</text>
+		</g>
+		<path id="a-fold" class="fold" d="M472,138 C500,138 500,90 470,64" />
+
+		<!-- ack row: A reads -->
+		<text class="row-label" x="50" y="203">reads</text>
+		<g class="chip ack"><rect x="92" y="189" width="44" height="20" rx="10" /><text x="114" y="203" text-anchor="middle">ack</text></g>
+		<text id="a-ack-none" class="mono dim" x="150" y="203">—</text>
+		<g id="a-ack-reg" style="opacity:0">
+			<text id="a-ack-reg-l1" class="mono" x="150" y="203">Register #0 ✓  up_to 0</text>
+			<text id="a-req-line" class="mono small dim" x="150" y="225">→ requires (B, T<tspan class="subs" dy="3">B1</tspan><tspan dy="-3">) via host fn 205</tspan></text>
+		</g>
+
+		<!-- Stage 1: credit gauge and the block's send calls -->
+		<g id="a-credit" style="opacity:0">
+			<text class="mono small dim" x="150" y="228">in flight</text>
+			<rect class="credit-bg" x="222" y="221" width="120" height="8" rx="4" />
+			<rect id="a-credit-fill" class="credit-fill" x="222" y="221" width="7.5" height="8" rx="4" />
+			<text id="a-cr-1" class="mono small" x="352" y="228">1 / 16 msg</text>
+			<text id="a-cr-2" class="mono small" x="352" y="228" style="opacity:0">2 / 16 msg</text>
+			<text id="a-cr-3" class="mono small" x="352" y="228" style="opacity:0">3 / 16 msg</text>
+			<text id="a-cr-0" class="mono small" x="352" y="228" style="opacity:0">0 / 16 msg</text>
+		</g>
+		<!-- Stage 6: B's second register, read under T_B2 -->
+		<text id="a-ack-reg2" class="mono" x="150" y="203" style="opacity:0">Register #1 ✓  up_to 3</text>
+		<text id="a-req2" class="mono small dim" x="150" y="252" style="opacity:0">→ requires (B, T<tspan class="subs" dy="3">B2</tspan><tspan dy="-3">) via host fn 205</tspan></text>
+		<g id="a-leaf1s" class="leaf" style="opacity:0">
+			<rect x="204" y="118" width="48" height="40" rx="6" />
+			<text class="msg-leaf" x="228" y="143" text-anchor="middle">m₁</text>
+		</g>
+		<g id="a-leaf2s" class="leaf" style="opacity:0">
+			<rect x="258" y="118" width="48" height="40" rx="6" />
+			<text class="msg-leaf" x="282" y="143" text-anchor="middle">m₂</text>
+		</g>
+		<text id="send-log1" class="send-log" x="150" y="288" style="opacity:0">send(B, 0, 0, m₁) ✓</text>
+		<text id="send-log2" class="send-log" x="300" y="288" style="opacity:0">send(B, 0, 0, m₂) ✓</text>
+	</g>
+
+	<!-- ───────────── Parachain B ───────────── -->
+	<g id="chainB" class="chain b">
+		<rect class="box" x="650" y="30" width="520" height="280" rx="14" />
+		<text class="title" x="670" y="64">Parachain B</text>
+		<text class="sub" x="806" y="64">receiver</text>
+		<g id="b-block" class="pill amber" transform="translate(1120,30)" style="opacity:0">
+			<rect x="-31" y="-11" width="62" height="22" rx="11" />
+			<text y="4" text-anchor="middle">block M</text>
+		</g>
+		<g id="b-block-ok" class="pill green" transform="translate(1120,30)" style="opacity:0">
+			<rect x="-32" y="-11" width="64" height="22" rx="11" />
+			<text class="tight" y="4" text-anchor="middle">block M ✓</text>
+		</g>
+
+		<text class="label" x="1008" y="62" text-anchor="end">StreamsRoot</text>
+		<g transform="translate(1054,57)">
+			<g id="b-root-pill" class="pill root">
+				<rect x="-36" y="-13" width="72" height="26" rx="13" />
+				<text id="b-root-0" class="mono dim" text-anchor="middle" y="5">—</text>
+				<text id="b-root-1" class="mono" text-anchor="middle" y="5" style="opacity:0">T<tspan class="subs" dy="3">B1</tspan></text>
+				<text id="b-root-2" class="mono" text-anchor="middle" y="5" style="opacity:0">T<tspan class="subs" dy="3">B2</tspan></text>
+			</g>
+		</g>
+
+		<text id="b-empty" class="hint" x="910" y="178" text-anchor="middle">no state for A · an unaccepted open costs B nothing</text>
+
+		<g id="b-channel" style="opacity:0">
+			<text class="ch-title" x="670" y="104">Channel A→B<tspan class="ch-tag" dx="12">domain 0 · num 0</tspan></text>
+			<g class="pill green" transform="translate(960,100)">
+				<rect x="-42" y="-11" width="84" height="22" rx="11" />
+				<text y="4" text-anchor="middle">Accepted</text>
+			</g>
+
+			<!-- data row: B reads -->
+			<text class="row-label" x="670" y="143">reads</text>
+			<g class="chip data"><rect x="712" y="129" width="44" height="20" rx="10" /><text x="734" y="143" text-anchor="middle">data</text></g>
+			<g class="slots">
+				<rect x="770" y="118" width="48" height="40" rx="6" />
+				<rect x="824" y="118" width="48" height="40" rx="6" />
+				<rect x="878" y="118" width="48" height="40" rx="6" />
+				<rect x="932" y="118" width="48" height="40" rx="6" />
+				<rect x="986" y="118" width="48" height="40" rx="6" />
+				<rect x="1040" y="118" width="48" height="40" rx="6" />
+			</g>
+			<text id="b-front-0" class="split-label" x="770" y="174">InboundFrontier · leaf_count 0 (A's data stream)</text>
+
+			<!-- ack row: B writes -->
+			<text class="row-label" x="670" y="203">writes</text>
+			<g class="chip ack"><rect x="712" y="189" width="44" height="20" rx="10" /><text x="734" y="203" text-anchor="middle">ack</text></g>
+			<g class="slots">
+				<rect x="770" y="180" width="48" height="40" rx="6" />
+				<rect x="824" y="180" width="48" height="40" rx="6" />
+				<rect x="878" y="180" width="48" height="40" rx="6" />
+				<rect x="932" y="180" width="48" height="40" rx="6" />
+				<rect x="986" y="180" width="48" height="40" rx="6" />
+				<rect x="1040" y="180" width="48" height="40" rx="6" />
+			</g>
+		</g>
+		<g id="b-leaf0" class="leaf" style="opacity:0">
+			<rect x="770" y="180" width="48" height="40" rx="6" />
+			<text x="794" y="205" text-anchor="middle">Reg</text>
+		</g>
+		<text id="b-leaf0-detail" class="detail mono" x="770" y="242" style="opacity:0">#0 Register · up_to 0 · grant 16 msg / 64 KiB</text>
+		<text id="b-leaf1-detail" class="detail mono" x="770" y="242" style="opacity:0">#1 Register · up_to 3 · grant 16 msg / 64 KiB</text>
+		<g id="b-leaf1" class="leaf" style="opacity:0">
+			<rect x="824" y="180" width="48" height="40" rx="6" />
+			<text x="848" y="205" text-anchor="middle">Reg′</text>
+		</g>
+		<!-- Stage 4: A's messages consumed into B's inbound frontier -->
+		<g id="b-in0" class="leaf acopy" style="opacity:0"><rect x="770" y="118" width="48" height="40" rx="6" /><text x="794" y="143" text-anchor="middle">OpenCh</text></g>
+		<g id="b-in1" class="leaf acopy" style="opacity:0"><rect x="824" y="118" width="48" height="40" rx="6" /><text class="msg-leaf" x="848" y="143" text-anchor="middle">m₁</text></g>
+		<g id="b-in2" class="leaf acopy" style="opacity:0"><rect x="878" y="118" width="48" height="40" rx="6" /><text class="msg-leaf" x="902" y="143" text-anchor="middle">m₂</text></g>
+		<text id="b-front-3" class="split-label" x="770" y="174" style="opacity:0">InboundFrontier · leaf_count 3 (A's data stream)</text>
+		<g id="b-record" style="opacity:0">
+			<text class="label" x="670" y="274">Consumption record · block M</text>
+			<text class="mono small" x="670" y="294">A · data stream: start root(∅) → end frontier(3)</text>
+		</g>
+		<path id="b-fold" class="fold" d="M1092,200 C1130,200 1130,90 1090,64" />
+	</g>
+
+	<!-- JAM frame, off-chain band, then route trails (cloned from the motion
+	     paths by main.js). All sit below collators and JAM nodes, so those
+	     boxes hide the parts of a trail that pass through them. -->
+	<g id="jam-frame" class="chain jam">
+		<rect class="box" x="30" y="480" width="1140" height="310" rx="14" />
+	</g>
+	<g id="offchain-band">
+		<rect class="band" x="140" y="316" width="920" height="160" rx="12" />
+		<text class="band-label" x="1046" y="466" text-anchor="end">OFF-CHAIN</text>
+	</g>
+	<rect id="offchain-band-hi" class="band-hi" x="140" y="316" width="920" height="160" rx="12" style="opacity:0" />
+	<g id="trails"></g>
+
+	<!-- ───────────── Collators (off-chain) ───────────── -->
+	<g id="colA" class="node-g a">
+		<rect class="node" x="150" y="360" width="280" height="92" rx="10" />
+		<text class="title-s" x="290" y="388" text-anchor="middle">A collator</text>
+		<!-- node-local archive of A's sends, by position on the data stream -->
+		<text id="a-archive" class="archive-label" x="168" y="415" style="opacity:0">archive · data</text>
+		<g id="arc-a0" class="archive-chip" style="opacity:0"><rect x="246" y="402" width="40" height="18" rx="4" /><text x="266" y="415" text-anchor="middle">OpenCh</text></g>
+		<g id="arc-a1" class="archive-chip" style="opacity:0"><rect x="290" y="402" width="40" height="18" rx="4" /><text x="310" y="416" text-anchor="middle" class="msg">m₁</text></g>
+		<g id="arc-a2" class="archive-chip" style="opacity:0"><rect x="334" y="402" width="40" height="18" rx="4" /><text x="354" y="416" text-anchor="middle" class="msg">m₂</text></g>
+		<text id="arc-a-pruned" class="archive-note" x="246" y="415" style="opacity:0">pruned #0–#2 (below up_to 3)</text>
+		<!-- peer data this collator fetched and verified, staged for its next inherent -->
+		<text id="a-fetched" class="archive-label" x="168" y="439" style="opacity:0">fetched · ack</text>
+		<g id="fet-a0" class="archive-chip b" style="opacity:0"><rect x="246" y="426" width="40" height="18" rx="4" /><text x="266" y="439" text-anchor="middle">Reg</text></g>
+		<text id="fet-a0-ok" class="fetch-ok" x="292" y="439" style="opacity:0">✓ T<tspan class="subs" dy="3">B1</tspan></text>
+		<g id="fet-a1" class="archive-chip b" style="opacity:0"><rect x="246" y="426" width="40" height="18" rx="4" /><text x="266" y="439" text-anchor="middle">Reg′</text></g>
+		<text id="fet-a1-ok" class="fetch-ok" x="292" y="439" style="opacity:0">✓ T<tspan class="subs" dy="3">B2</tspan></text>
+	</g>
+	<g id="colB" class="node-g b">
+		<rect class="node" x="770" y="360" width="280" height="92" rx="10" />
+		<text class="title-s" x="910" y="388" text-anchor="middle">B collator</text>
+		<text id="b-archive" class="archive-label" x="788" y="415" style="opacity:0">archive · ack</text>
+		<g id="arc-b0" class="archive-chip b" style="opacity:0"><rect x="866" y="402" width="40" height="18" rx="4" /><text x="886" y="415" text-anchor="middle">Reg</text></g>
+		<g id="arc-b1" class="archive-chip b" style="opacity:0"><rect x="910" y="402" width="40" height="18" rx="4" /><text x="930" y="415" text-anchor="middle">Reg′</text></g>
+		<text id="b-fetched" class="archive-label" x="788" y="439" style="opacity:0">fetched · data</text>
+		<g id="fet-b0" class="archive-chip" style="opacity:0"><rect x="866" y="426" width="40" height="18" rx="4" /><text x="886" y="439" text-anchor="middle">OpenCh</text></g>
+		<g id="fet-b1" class="archive-chip" style="opacity:0"><rect x="910" y="426" width="40" height="18" rx="4" /><text x="930" y="440" text-anchor="middle" class="msg">m₁</text></g>
+		<g id="fet-b2" class="archive-chip" style="opacity:0"><rect x="954" y="426" width="40" height="18" rx="4" /><text x="974" y="440" text-anchor="middle" class="msg">m₂</text></g>
+		<text id="fet-b-ok" class="fetch-ok" x="1000" y="439" style="opacity:0">✓ T<tspan class="subs" dy="3">A2</tspan></text>
+	</g>
+	<!-- Whoever signs accept_open_channel on B's side -->
+	<g id="user" class="actor" style="opacity:0">
+		<circle cx="1115" cy="383" r="8" />
+		<path d="M1101,407 a14,12 0 0 1 28,0 z" />
+		<text x="1115" y="424" text-anchor="middle">user</text>
+	</g>
+
+	<!-- ───────────── JAM chain ───────────── -->
+	<g id="jam" class="chain jam">
+		<text class="title" x="50" y="514">JAM chain</text>
+		<text class="sub" x="160" y="514">Parachain Service · stores 32-byte roots only</text>
+
+		<g id="refine" class="node-g">
+			<rect class="node" x="480" y="530" width="200" height="60" rx="10" />
+			<text class="title-s" x="580" y="556" text-anchor="middle">Refine</text>
+			<text class="sub" x="580" y="576" text-anchor="middle">host fn 204 → streams_root</text>
+		</g>
+		<line class="flow" x1="580" y1="590" x2="580" y2="630" />
+		<text class="hint" x="572" y="614" text-anchor="end">work digest</text>
+		<g id="accumulate" class="node-g">
+			<rect class="node" x="480" y="630" width="200" height="60" rx="10" />
+			<text class="title-s" x="580" y="656" text-anchor="middle">Accumulate</text>
+			<text class="sub" x="580" y="676" text-anchor="middle">settle · push into ring</text>
+		</g>
+
+		<!-- Stage 2: what sits at Refine / Accumulate for block N -->
+		<g id="refine-wp" class="pill amber" transform="translate(760,560)" style="opacity:0">
+			<rect x="-58" y="-11" width="116" height="22" rx="11" />
+			<text y="4" text-anchor="middle">WP · block N</text>
+		</g>
+		<g id="join-badges" class="ok" style="opacity:0">
+			<text x="592" y="606">✓ guaranteed</text>
+			<text x="592" y="623">✓ available</text>
+		</g>
+		<g id="acc-digest" class="pill blue" transform="translate(760,660)" style="opacity:0">
+			<rect x="-58" y="-11" width="116" height="22" rx="11" />
+			<text class="mono" y="4" text-anchor="middle">digest · T<tspan class="subs" dy="3">A2</tspan></text>
+		</g>
+
+		<g id="refine-wpB" class="pill amber" transform="translate(760,560)" style="opacity:0">
+			<rect x="-58" y="-11" width="116" height="22" rx="11" />
+			<text y="4" text-anchor="middle">WP · block M</text>
+		</g>
+		<g id="acc-digestB" class="pill blue" transform="translate(580,714)" style="opacity:0">
+			<rect x="-100" y="-11" width="200" height="22" rx="11" />
+			<text class="mono" y="4" text-anchor="middle">digest · requires (A, T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>)</text>
+		</g>
+
+		<!-- settlement ring A; the caret marks the next free slot -->
+		<g class="slots">
+			<rect x="60" y="592" width="40" height="40" rx="6" />
+			<rect x="104" y="592" width="40" height="40" rx="6" />
+			<rect x="148" y="592" width="40" height="40" rx="6" />
+			<rect x="192" y="592" width="40" height="40" rx="6" />
+			<rect x="236" y="592" width="40" height="40" rx="6" />
+			<rect x="280" y="592" width="40" height="40" rx="6" />
+		</g>
+		<text class="hint" x="326" y="617">…64</text>
+		<g id="a-ring0" class="ring-entry a" style="opacity:0">
+			<rect x="60" y="592" width="40" height="40" rx="6" />
+			<text class="mono" x="80" y="616" text-anchor="middle">T<tspan class="subs" dy="3">A1</tspan></text>
+		</g>
+		<g id="a-ring1" class="ring-entry a" style="opacity:0">
+			<rect x="104" y="592" width="40" height="40" rx="6" />
+			<text class="mono" x="124" y="616" text-anchor="middle">T<tspan class="subs" dy="3">A2</tspan></text>
+		</g>
+		<g id="a-tail" class="caret tail" style="opacity:0">
+			<path d="M80,640 l-6,10 h12 z" />
+			<text x="86" y="663" text-anchor="end">tail</text>
+		</g>
+		<g id="a-head" class="caret">
+			<path d="M80,640 l-6,10 h12 z" />
+			<text x="74" y="663">head · next write</text>
+		</g>
+		<text class="label" x="60" y="688">settlement ring · A</text>
+
+		<!-- settlement ring B -->
+		<g class="slots">
+			<rect x="860" y="592" width="40" height="40" rx="6" />
+			<rect x="904" y="592" width="40" height="40" rx="6" />
+			<rect x="948" y="592" width="40" height="40" rx="6" />
+			<rect x="992" y="592" width="40" height="40" rx="6" />
+			<rect x="1036" y="592" width="40" height="40" rx="6" />
+			<rect x="1080" y="592" width="40" height="40" rx="6" />
+		</g>
+		<text class="hint" x="1126" y="617">…64</text>
+		<g id="b-ring0" class="ring-entry b" style="opacity:0">
+			<rect x="860" y="592" width="40" height="40" rx="6" />
+			<text class="mono" x="880" y="616" text-anchor="middle">T<tspan class="subs" dy="3">B1</tspan></text>
+		</g>
+		<g id="b-ring1" class="ring-entry b" style="opacity:0">
+			<rect x="904" y="592" width="40" height="40" rx="6" />
+			<text class="mono" x="924" y="616" text-anchor="middle">T<tspan class="subs" dy="3">B2</tspan></text>
+		</g>
+		<g id="b-tail" class="caret tail" style="opacity:0">
+			<path d="M880,640 l-6,10 h12 z" />
+			<text x="886" y="663" text-anchor="end">tail</text>
+		</g>
+		<g id="b-head" class="caret">
+			<path d="M880,640 l-6,10 h12 z" />
+			<text x="874" y="663">head · next write</text>
+		</g>
+		<text class="label" x="860" y="688">settlement ring · B</text>
+
+		<text id="a-32" class="size-badge" x="84" y="586" style="opacity:0">32 B</text>
+		<text id="b-32" class="size-badge" x="884" y="586" style="opacity:0">32 B</text>
+	</g>
+
+	<!-- Highlights for the summary step -->
+	<rect id="halo-a" class="halo" x="52" y="584" width="56" height="56" rx="10" style="opacity:0" />
+	<rect id="halo-b" class="halo" x="852" y="584" width="56" height="56" rx="10" style="opacity:0" />
+
+	<!-- A's collator reading B's newest root from B's ring -->
+	<path id="read-line" class="read-line" d="M880,590 C880,500 640,470 432,425" />
+	<path id="read-line2" class="read-line" d="M124,590 C124,565 430,575 452,510 C468,465 690,455 768,445" />
+	<path id="read-line3" class="read-line" d="M924,590 C924,500 640,475 432,440" />
+
+	<!-- Stage 5: Accumulate's settlement check reaches into A's ring -->
+	<path id="check-line" class="check-line" d="M480,640 C400,580 150,540 124,598" />
+	<g id="check-lbl" class="pill green" transform="translate(330,548)" style="opacity:0">
+		<rect x="-104" y="-11" width="208" height="22" rx="11" />
+		<text class="mono-pill" y="4" text-anchor="middle">(A, T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>) is in A's ring ✓</text>
+	</g>
+
+	<!-- ───────────── Stream id explainer (modal card) ───────────── -->
+	<g id="anatomy" style="opacity:0">
+		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
+		<rect class="card" x="170" y="250" width="860" height="335" rx="16" />
+		<text class="title" x="200" y="292">Reading a stream id</text>
+		<text class="sub" x="404" y="292">every stream has one · the recipient is whoever reads it</text>
+
+		<text id="an-id" class="mono big" x="200" y="340"><tspan class="k-kind">Channel</tspan><tspan class="k-punct">{</tspan><tspan class="k-rcpt">recipient: B</tspan><tspan class="k-punct">, </tspan><tspan class="k-dom">domain: 0</tspan><tspan class="k-punct">, </tspan><tspan class="k-num">num: 0</tspan><tspan class="k-punct">}</tspan></text>
+
+		<g id="an-row-kind" class="an-row" style="opacity:0">
+			<circle class="k-kind" cx="206" cy="376" r="5" />
+			<text class="mono k-kind" x="220" y="380">Channel</text>
+			<text x="360" y="380">stream kind: A's ordered data and lifecycle signals</text>
+		</g>
+		<g id="an-row-rcpt" class="an-row" style="opacity:0">
+			<circle class="k-rcpt" cx="206" cy="402" r="5" />
+			<text class="mono k-rcpt" x="220" y="406">recipient: B</text>
+			<text x="360" y="406">who reads the stream: B consumes it</text>
+		</g>
+		<g id="an-row-dom" class="an-row" style="opacity:0">
+			<circle class="k-dom" cx="206" cy="428" r="5" />
+			<text class="mono k-dom" x="220" y="432">domain: 0</text>
+			<text x="360" y="432">app address space · reserved, 0 until a chain hands ranges to its apps</text>
+		</g>
+		<g id="an-row-num" class="an-row" style="opacity:0">
+			<circle class="k-num" cx="206" cy="454" r="5" />
+			<text class="mono k-num" x="220" y="458">num: 0</text>
+			<text x="360" y="458">channel number · a second, independent channel A → B would be num: 1</text>
+		</g>
+
+		<g id="an-ack" style="opacity:0">
+			<line class="card-sep" x1="200" y1="478" x2="1000" y2="478" />
+			<text class="mono mid" x="200" y="508"><tspan class="k-ack">Ack</tspan><tspan class="k-punct">{</tspan><tspan class="k-rcpt-a">recipient: A</tspan><tspan class="k-punct">, </tspan><tspan class="k-dom">domain: 0</tspan><tspan class="k-punct">, </tspan><tspan class="k-num">num: 0</tspan><tspan class="k-punct">}</tspan></text>
+			<text x="200" y="532">B's register stream for the same channel: same domain and num, kind flipped, recipient swapped to A</text>
+		</g>
+		<text id="an-short" class="hint" x="200" y="566" style="opacity:0">On screen this pair is "Channel A→B", with its two streams labelled data and ack.</text>
+	</g>
+
+	<!-- ───────────── Stage 1: block-end commitment card ───────────── -->
+	<g id="bag" style="opacity:0">
+		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
+		<rect class="card" x="170" y="210" width="860" height="395" rx="16" />
+		<text class="title" x="200" y="250">Block N end · one hash for all streams</text>
+
+		<!-- 1: bag the data stream's MMR -->
+		<text class="label" x="200" y="284">1 · bag the data stream, in memory</text>
+		<text class="mono small dim" x="200" y="304">stored frontier: leaf_count 1 · peaks [#0]</text>
+		<path id="mmr-e0" class="medge" d="M242,540 L270,496" />
+		<path id="mmr-e1" class="medge" d="M312,540 L284,496" />
+		<path id="mmr-b0" class="medge" d="M277,466 L300,408" />
+		<path id="mmr-b1" class="medge" d="M382,540 C382,470 362,430 340,408" />
+		<g id="mmr-l0" class="mnode frontier">
+			<rect x="220" y="540" width="44" height="30" rx="5" />
+			<text x="242" y="560" text-anchor="middle">#0</text>
+		</g>
+		<g id="mmr-l1" class="mnode pending" style="opacity:0">
+			<rect x="290" y="540" width="44" height="30" rx="5" />
+			<text x="312" y="560" text-anchor="middle">#1</text>
+		</g>
+		<g id="mmr-l2" class="mnode pending" style="opacity:0">
+			<rect x="360" y="540" width="44" height="30" rx="5" />
+			<text x="382" y="560" text-anchor="middle">#2</text>
+		</g>
+		<g id="mmr-n01" class="mnode inner" style="opacity:0">
+			<rect x="255" y="466" width="44" height="30" rx="5" />
+			<text x="277" y="486" text-anchor="middle">h₀₁</text>
+		</g>
+		<text id="mmr-peaks" class="hint" x="420" y="490" style="opacity:0">peaks: h₀₁ and #2</text>
+		<g id="mmr-root" class="mroot" style="opacity:0">
+			<rect x="230" y="378" width="180" height="30" rx="6" />
+			<text x="320" y="398" text-anchor="middle">data root = bag(peaks)</text>
+		</g>
+		<text class="hint" x="200" y="592">the stored frontier only catches up at block N+1 init</text>
+
+		<!-- 2: fold into the commitment trie -->
+		<g id="bag-right" style="opacity:0">
+			<text class="label" x="620" y="284">2 · fold into the commitment trie</text>
+			<path class="tedge" d="M800,336 L710,440" />
+			<path class="tedge" d="M840,336 L920,440" />
+			<path id="trie-edge-hot" class="tedge hot" d="M710,440 L800,336" />
+			<text class="mono small dim" x="742" y="392" text-anchor="end">key Channel{B,0,0}</text>
+			<g id="trie-root-g" class="tnode root-n">
+				<rect x="760" y="306" width="120" height="30" rx="6" />
+				<text id="trie-root-0" class="mono" x="820" y="326" text-anchor="middle">T<tspan class="subs" dy="3">A1</tspan></text>
+				<text id="trie-root-1" class="mono" x="820" y="326" text-anchor="middle" style="opacity:0">T<tspan class="subs" dy="3">A2</tspan></text>
+			</g>
+			<g id="trie-leaf-old" class="tnode">
+				<rect x="650" y="440" width="120" height="30" rx="6" />
+				<text x="710" y="460" text-anchor="middle">data root (old)</text>
+			</g>
+			<g id="trie-leaf-new" class="tnode hot" style="opacity:0">
+				<rect x="650" y="440" width="120" height="30" rx="6" />
+				<text x="710" y="460" text-anchor="middle">data root (new)</text>
+			</g>
+			<g class="tnode dimmed">
+				<rect x="860" y="440" width="120" height="30" rx="6" />
+				<text x="920" y="460" text-anchor="middle">other streams</text>
+			</g>
+			<text class="hint" x="920" y="488" text-anchor="middle">unchanged, not rehashed</text>
+			<g id="bag-out" style="opacity:0">
+				<text x="620" y="530">→ header digest · for off-chain verifiers</text>
+				<text x="620" y="552">→ host fn 204 in validation · for JAM</text>
+			</g>
+			<text class="hint" x="620" y="592">one path rehashed per touched stream: O(k · log S)</text>
+		</g>
+		<g id="bag-fly" class="token a" style="opacity:0">
+			<rect x="-42" y="-13" width="84" height="26" rx="13" />
+			<text class="mono" y="5" text-anchor="middle">data root</text>
+		</g>
+	</g>
+
+	<!-- ───────────── Stage 2: Refine card ───────────── -->
+	<g id="rf-card" style="opacity:0">
+		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
+		<rect class="card" x="170" y="210" width="860" height="395" rx="16" />
+		<text class="title" x="200" y="250">Refine · in-core, on the guarantors</text>
+		<text class="sub" x="200" y="272">a child PVM re-executes block N from the PoV; its host calls fill the work digest</text>
+		<text class="label" x="200" y="300">host call / source</text>
+		<text class="label" x="620" y="300">ParachainWorkDigest::Ok</text>
+		<line class="card-sep" x1="200" y1="308" x2="1000" y2="308" />
+		<g id="rf-r0" class="rf-row" style="opacity:0"><text class="mono dim" x="200" y="330">authorizer config</text><text class="arrow" x="590" y="330">→</text><text class="mono" x="620" y="330">para_id: A</text></g>
+		<g id="rf-r1" class="rf-row" style="opacity:0"><text class="mono dim" x="200" y="354">historical_lookup(code hash)</text><text class="arrow" x="590" y="354">→</text><text class="mono" x="620" y="354">validation_code: hash</text></g>
+		<g id="rf-r2" class="rf-row" style="opacity:0"><text class="mono" x="200" y="378">200 set_parent_head_hash(…)</text><text class="arrow" x="590" y="378">→</text><text class="mono" x="620" y="378">parent_head_hash</text></g>
+		<g id="rf-r3" class="rf-row" style="opacity:0"><text class="mono" x="200" y="402">201 set_head(head N)</text><text class="arrow" x="590" y="402">→</text><text class="mono" x="620" y="402">head_data: head N</text></g>
+		<g id="rf-r4" class="rf-row" style="opacity:0"><text class="mono dim" x="200" y="426">202 not called</text><text class="arrow" x="590" y="426">→</text><text class="mono" x="620" y="426">upward_messages: []</text></g>
+		<g id="rf-r5" class="rf-row" style="opacity:0"><text class="mono dim" x="200" y="450">work package context</text><text class="arrow" x="590" y="450">→</text><text class="mono" x="620" y="450">lookup_anchor: slot</text></g>
+		<g id="rf-r6" class="rf-row hot" style="opacity:0"><rect class="row-hi" x="192" y="461" width="816" height="26" rx="6" /><text class="mono" x="200" y="479">204 set_messages_streams_root(T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>)</text><text class="arrow" x="590" y="479">→</text><text class="mono" x="620" y="479">messages_streams_root: Some(T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>)</text></g>
+		<g id="rf-r7" class="rf-row" style="opacity:0"><text class="mono dim" x="200" y="508">205 not called: block N read nothing</text><text class="arrow" x="590" y="508">→</text><text class="mono" x="620" y="508">messages_requires_roots: []</text></g>
+		<text id="rf-foot" class="hint" x="200" y="580" style="opacity:0">Refine is stateless: it writes no service storage. Everything reaches Accumulate through this digest.</text>
+	</g>
+
+	<!-- ───────────── Stage 2: Accumulate card ───────────── -->
+	<g id="ac-card" style="opacity:0">
+		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
+		<rect class="card" x="170" y="210" width="860" height="395" rx="16" />
+		<text class="title" x="200" y="250">Accumulate · on-chain, once per work package</text>
+		<text class="sub" x="200" y="272">checks run in order; the first failure rejects block N without a trace</text>
+		<g id="ac-r0" class="ac-row" style="opacity:0"><text class="label" x="200" y="310">gas gate</text><text x="290" y="310">base + report cost fit the report's own gas limit</text><text class="tick" x="990" y="310" text-anchor="end">✓</text></g>
+		<g id="ac-r1" class="ac-row" style="opacity:0"><text class="label" x="200" y="340">1</text><text x="290" y="340">A is registered and not deregistering</text><text class="tick" x="990" y="340" text-anchor="end">✓</text></g>
+		<g id="ac-r2" class="ac-row" style="opacity:0"><text class="label" x="200" y="370">2</text><text x="290" y="370">validation_code matches A's current code</text><text class="tick" x="990" y="370" text-anchor="end">✓</text></g>
+		<g id="ac-r3" class="ac-row" style="opacity:0"><text class="label" x="200" y="400">3</text><text x="290" y="400">the digest is Ok (an Err would only be logged)</text><text class="tick" x="990" y="400" text-anchor="end">✓</text></g>
+		<g id="ac-r4" class="ac-row" style="opacity:0"><text class="label" x="200" y="430">4</text><text x="290" y="430">parent_head_hash = hash(A's current head)</text><text class="tick" x="990" y="430" text-anchor="end">✓</text></g>
+		<g id="ac-r5" class="ac-row" style="opacity:0"><rect class="row-hi" x="192" y="441" width="816" height="26" rx="6" /><text class="label" x="200" y="460">5</text><text x="290" y="460">settlement: every requires root is in its sender's ring</text><text class="mono dim" x="958" y="460" text-anchor="end">none</text><text class="tick" x="990" y="460" text-anchor="end">✓</text></g>
+		<g id="ac-r6" class="ac-row" style="opacity:0"><text class="label" x="200" y="490">6</text><text x="290" y="490">enact: write head_data, push T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan> into A's ring</text><text class="tick" x="990" y="490" text-anchor="end">✓</text></g>
+		<g id="ac-r7" class="ac-row" style="opacity:0"><text class="label" x="200" y="520">7</text><text x="290" y="520">replay upward messages</text><text class="mono dim" x="958" y="520" text-anchor="end">none</text><text class="tick" x="990" y="520" text-anchor="end">✓</text></g>
+		<text id="ac-foot" class="hint" x="200" y="580" style="opacity:0">a rejected candidate writes no state and records no log entry</text>
+	</g>
+
+	<!-- ───────────── Stage 3: B's collator verifies the response ───────────── -->
+	<g id="vf-card" style="opacity:0">
+		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
+		<rect class="card" x="170" y="250" width="860" height="300" rx="16" />
+		<text class="title" x="200" y="290">B's collator checks the response, node-side</text>
+		<text class="sub" x="200" y="312">every response is verifiable on its own, against exactly the root the request named</text>
+		<line class="card-sep" x1="200" y1="326" x2="1000" y2="326" />
+		<g id="vf-r0" class="rf-row" style="opacity:0"><text class="mono" x="200" y="352">hash OpenCh, m₁, m₂; append to frontier(0)</text><text class="arrow" x="590" y="352">→</text><text class="mono" x="620" y="352">frontier(3)</text></g>
+		<g id="vf-r1" class="rf-row" style="opacity:0"><text class="mono" x="200" y="380">extension: empty (payloads reach the entry)</text><text class="arrow" x="590" y="380">→</text><text class="mono" x="620" y="380">data root</text></g>
+		<g id="vf-r2" class="rf-row" style="opacity:0"><text class="mono" x="200" y="408">walk tree_proof, key Channel{B,0,0}</text><text class="arrow" x="590" y="408">→</text><text class="mono" x="620" y="408">StreamsRoot</text></g>
+		<g id="vf-r3" class="rf-row hot" style="opacity:0"><rect class="row-hi" x="192" y="422" width="816" height="26" rx="6" /><text class="mono" x="200" y="440">compare with the root the request named</text><text class="arrow" x="590" y="440">→</text><text class="mono" x="620" y="440">= T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan> ✓</text></g>
+		<text id="vf-foot" class="hint" x="200" y="525" style="opacity:0">a mismatch anywhere discards the response and the peer; one honest collator is enough</text>
+	</g>
+
+	<!-- ───────────── Stage 5: Refine for block M ───────────── -->
+	<g id="rf2-card" style="opacity:0">
+		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
+		<rect class="card" x="170" y="210" width="860" height="395" rx="16" />
+		<text class="title" x="200" y="250">Refine for block M · the validate_block wrapper</text>
+		<text class="sub" x="200" y="272">block M never saw a root; the wrapper binds its consumption to one, using the lift in the PoV</text>
+		<text class="label" x="200" y="300">wrapper step</text>
+		<text class="label" x="620" y="300">result</text>
+		<line class="card-sep" x1="200" y1="308" x2="1000" y2="308" />
+		<g id="rf2-r0" class="rf-row" style="opacity:0"><text class="mono" x="200" y="332">execute block M</text><text class="arrow" x="590" y="332">→</text><text class="mono" x="620" y="332">record: A · data → frontier(3)</text></g>
+		<g id="rf2-r1" class="rf-row" style="opacity:0"><text class="mono" x="200" y="358">stitch: one interval, no gaps</text><text class="arrow" x="590" y="358">→</text><text class="mono" x="620" y="358">endpoint = frontier(3)</text></g>
+		<g id="rf2-r2" class="rf-row" style="opacity:0"><text class="mono" x="200" y="384">lift.extension: empty (caught up)</text><text class="arrow" x="590" y="384">→</text><text class="mono" x="620" y="384">data root = bag(frontier(3))</text></g>
+		<g id="rf2-r3" class="rf-row" style="opacity:0"><text class="mono" x="200" y="410">lift.tree_proof, key Channel{B,0,0}</text><text class="arrow" x="590" y="410">→</text><text class="mono" x="620" y="410">StreamsRoot = T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan></text></g>
+		<g id="rf2-r4" class="rf-row hot" style="opacity:0"><rect class="row-hi" x="192" y="422" width="816" height="26" rx="6" /><text class="mono" x="200" y="440">205 set_messages_requires_roots</text><text class="arrow" x="590" y="440">→</text><text class="mono" x="620" y="440">requires_roots: [(A, T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>)]</text></g>
+		<g id="rf2-r5" class="rf-row" style="opacity:0"><text class="mono dim" x="200" y="470">204 not called: block M sent nothing</text><text class="arrow" x="590" y="470">→</text><text class="mono" x="620" y="470">messages_streams_root: None</text></g>
+		<text id="rf2-foot" class="hint" x="200" y="580" style="opacity:0">the lift is public data: anyone can rebuild it from A's streams and roots, so any collator can complete the candidate</text>
+	</g>
+
+	<!-- ───────────── Goal card (very first step) ───────────── -->
+	<g id="goal" style="opacity:0">
+		<rect class="backdrop solid" x="0" y="0" width="1200" height="820" />
+		<text id="goal-kicker" class="kicker" x="600" y="150" text-anchor="middle">SPECULATIVE MESSAGING · PARACHAIN SERVICE ON JAM</text>
+		<text id="goal-title" class="hero" x="600" y="210" text-anchor="middle">Sending messages between parachains</text>
+		<text id="goal-sub" class="sub big-sub" x="600" y="245" text-anchor="middle">an end-to-end walkthrough of the inclusion tier</text>
+
+		<g id="goal-text">
+			<text class="goal-line" x="600" y="300" text-anchor="middle">Goal: parachain A sends messages to parachain B.</text>
+			<text class="goal-line" x="600" y="326" text-anchor="middle">They open a unidirectional channel A→B: A writes, B reads.</text>
+		</g>
+
+		<g id="goal-diagram">
+			<rect class="goal-node a" x="330" y="370" width="140" height="70" rx="12" />
+			<text class="goal-node-t a" x="400" y="412" text-anchor="middle">Parachain A</text>
+			<rect class="goal-node b" x="730" y="370" width="140" height="70" rx="12" />
+			<text class="goal-node-t b" x="800" y="412" text-anchor="middle">Parachain B</text>
+			<path id="goal-arrow" class="goal-arrow" d="M476,396 L722,396" />
+			<path class="goal-head" d="M722,396 l-12,-7 v14 z" />
+			<text class="goal-lbl" x="600" y="384" text-anchor="middle">Channel A→B · messages</text>
+			<g id="goal-rev" style="opacity:0">
+				<path class="goal-arrow rev" d="M800,446 C800,486 400,486 400,446" />
+				<text class="hint" x="600" y="506" text-anchor="middle">replies would need a second, separate channel B→A</text>
+			</g>
+			<circle id="goal-msg" class="goal-msg" r="7" cx="0" cy="0" style="opacity:0" />
+		</g>
+
+		<g id="goal-road">
+			<text class="label" x="600" y="540" text-anchor="middle">THE STAGES</text>
+			<text class="road done" x="300" y="572">0 · Open the channel</text>
+			<text class="road done" x="300" y="599">1 · A authors a block</text>
+			<text class="road done" x="300" y="626">2 · Block N through JAM</text>
+			<text class="road done" x="640" y="572">3 · B fetches the messages</text>
+			<text class="road done" x="640" y="599">4 · B consumes them</text>
+			<text class="road done" x="640" y="626">5 · B's block settles</text>
+			<text class="road done" x="640" y="653">6 · Credit flows back to A</text>
+			<text class="hint" x="600" y="700" text-anchor="middle">→ / Space to step through · ← back · R replay</text>
+		</g>
+	</g>
+
+	<!-- ───────────── Travelling tokens ───────────── -->
+	<g id="tokA" class="token a" style="opacity:0">
+		<rect x="-30" y="-14" width="60" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">T<tspan class="subs" dy="3">A1</tspan></text>
+	</g>
+	<g id="tokB" class="token b" style="opacity:0">
+		<rect x="-30" y="-14" width="60" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">T<tspan class="subs" dy="3">B1</tspan></text>
+	</g>
+	<!-- Both ways into a block share one style: a signed tx and an inherent -->
+	<g id="tx" class="token ext" style="opacity:0">
+		<rect x="-132" y="-14" width="264" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">↑ tx: accept_open_channel(A, 0, 0)</text>
+	</g>
+	<g id="req" class="token offchain" style="opacity:0">
+		<rect x="-107" y="-13" width="214" height="26" rx="13" />
+		<text class="mono" y="5" text-anchor="middle">EventRequest · under T<tspan class="subs" dy="3">B1</tspan><tspan dy="-3"> →</tspan></text>
+	</g>
+	<g id="resp" class="token offchain" style="opacity:0">
+		<rect x="-115" y="-13" width="230" height="26" rx="13" />
+		<text class="mono" y="5" text-anchor="middle">← Register + MMR + tree proof</text>
+	</g>
+	<g id="inh" class="token ext" style="opacity:0">
+		<rect x="-112" y="-14" width="224" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">↑ inherent: Register + proof</text>
+	</g>
+	<g id="fly1" class="token call" style="opacity:0">
+		<rect x="-16" y="-11" width="32" height="22" rx="11" />
+		<text class="mono" y="4" text-anchor="middle">m₁</text>
+	</g>
+	<g id="fly2" class="token call" style="opacity:0">
+		<rect x="-16" y="-11" width="32" height="22" rx="11" />
+		<text class="mono" y="4" text-anchor="middle">m₂</text>
+	</g>
+	<!-- Leaf copies the collator pulls into its archive via outbound_messages() -->
+	<g id="fly-a0" class="archive-chip" style="opacity:0"><rect x="-20" y="-9" width="40" height="18" rx="4" /><text y="4" text-anchor="middle">OpenCh</text></g>
+	<g id="fly-a1" class="archive-chip" style="opacity:0"><rect x="-20" y="-9" width="40" height="18" rx="4" /><text y="4" text-anchor="middle" class="msg">m₁</text></g>
+	<g id="fly-a2" class="archive-chip" style="opacity:0"><rect x="-20" y="-9" width="40" height="18" rx="4" /><text y="4" text-anchor="middle" class="msg">m₂</text></g>
+	<g id="fly-b0" class="archive-chip b" style="opacity:0"><rect x="-20" y="-9" width="40" height="18" rx="4" /><text y="4" text-anchor="middle">Reg</text></g>
+	<g id="wp" class="token ext" style="opacity:0">
+		<rect x="-88" y="-14" width="176" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">work package · block N</text>
+	</g>
+	<g id="dg" class="token a" style="opacity:0">
+		<rect x="-58" y="-14" width="116" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">digest · T<tspan class="subs" dy="3">A2</tspan></text>
+	</g>
+	<g id="tokA2" class="token a" style="opacity:0">
+		<rect x="-30" y="-14" width="60" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">T<tspan class="subs" dy="3">A2</tspan></text>
+	</g>
+	<g id="mreq" class="token offchain" style="opacity:0">
+		<rect x="-118" y="-13" width="236" height="26" rx="13" />
+		<text class="mono" y="5" text-anchor="middle">← MessagesRequest #0… under T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan></text>
+	</g>
+	<g id="mresp" class="token offchain" style="opacity:0">
+		<rect x="-98" y="-13" width="196" height="26" rx="13" />
+		<text class="mono" y="5" text-anchor="middle">OpenCh m₁ m₂ + proofs →</text>
+	</g>
+	<g id="inhB" class="token ext" style="opacity:0">
+		<rect x="-112" y="-14" width="224" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">↑ inherent: OpenCh m₁ m₂</text>
+	</g>
+	<g id="wpB" class="token ext" style="opacity:0">
+		<rect x="-100" y="-14" width="200" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">work package · block M</text>
+	</g>
+	<g id="dgB" class="token a" style="opacity:0">
+		<rect x="-100" y="-14" width="200" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">digest · requires (A, T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>)</text>
+	</g>
+	<g id="tokB2" class="token b" style="opacity:0">
+		<rect x="-30" y="-14" width="60" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">T<tspan class="subs" dy="3">B2</tspan></text>
+	</g>
+	<g id="req2" class="token offchain" style="opacity:0">
+		<rect x="-107" y="-13" width="214" height="26" rx="13" />
+		<text class="mono" y="5" text-anchor="middle">EventRequest · under T<tspan class="subs" dy="3">B2</tspan><tspan dy="-3"> →</tspan></text>
+	</g>
+	<g id="resp2" class="token offchain" style="opacity:0">
+		<rect x="-115" y="-13" width="230" height="26" rx="13" />
+		<text class="mono" y="5" text-anchor="middle">← Reg′ + MMR + tree proof</text>
+	</g>
+	<g id="inh2" class="token ext" style="opacity:0">
+		<rect x="-100" y="-14" width="200" height="28" rx="14" />
+		<text class="mono" y="5" text-anchor="middle">↑ inherent: Reg′ + proof</text>
+	</g>
+	<g id="fly-b1" class="archive-chip b" style="opacity:0"><rect x="-20" y="-9" width="40" height="18" rx="4" /><text x="0" y="4" text-anchor="middle">Reg′</text></g>
+</svg>
+
+<aside id="panel">
+	<div id="stage"></div>
+	<h1 id="step-title"></h1>
+	<div id="step-body"></div>
+	<div id="step-ref"></div>
+	<nav>
+		<div id="stages"></div>
+		<div id="dots"></div>
+		<div class="buttons">
+			<button id="prev" title="Previous step (←)">←</button>
+			<button id="replay" title="Replay step (R)">↻</button>
+			<button id="next" title="Next step (→ / Space)">→</button>
+		</div>
+		<div class="keys">→ / Space next · ← back · R replay</div>
+	</nav>
+</aside>
+</main>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
