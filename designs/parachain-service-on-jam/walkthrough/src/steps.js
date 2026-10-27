@@ -2,25 +2,26 @@
 // Refs: SM = speculative-messaging-design.md, PS = parachain-service-on-jam.md.
 // The scene shows *what* changes; the panel explains *why*.
 //
-// Structure: Part I runs the whole round trip at actor level and marks every
-// compressed mechanism ①–⑤. Part II rewinds and opens each mechanism on block
-// N's messages.
+// One pass through the round trip. Channel setup is told compactly; the first
+// data block (block N) then shows every mechanism in detail on its way to B.
 
-const P1 = 'Part I · The big picture'
-const C1 = 'Part II · ① Commit'
-const C2 = 'Part II · ② Settle'
-const C3 = 'Part II · ③ Fetch & verify'
-const C4 = 'Part II · ④ Consume & lift'
-const C5 = 'Part II · ⑤ Settlement check'
+const S0 = 'Introduction'
+const S1 = 'Opening the channel'
+const S2 = 'A sends block N'
+const S3 = 'Block N settles on JAM'
+const S4 = 'B fetches the messages'
+const S5 = 'B consumes them'
+const S6 = 'Block M settles'
+const S7 = 'Credit flows back'
 
-// Labels of the stage buttons in the panel.
-export const chips = { [P1]: 'I', [C1]: '①', [C2]: '②', [C3]: '③', [C4]: '④', [C5]: '⑤' }
+// Labels of the chapter buttons in the panel.
+export const chips = { [S0]: '★', [S1]: '1', [S2]: '2', [S3]: '3', [S4]: '4', [S5]: '5', [S6]: '6', [S7]: '7' }
 
 export const steps = [
-	// ════════ Part I ════════
+	// ── Introduction ──
 	{
 		id: 'goal',
-		stage: P1,
+		stage: S0,
 		title: 'Messages between two parachains',
 		body: `
 			<p><strong>Goal:</strong> parachain A sends messages to parachain B.</p>
@@ -30,15 +31,14 @@ export const steps = [
 				settles 32-byte roots that commit to them.</li>
 				<li>Messages travel over a <strong>channel</strong>. A→B lets A write and B read.</li>
 				<li>Channels are unidirectional: replies would need a second channel B→A.</li>
-				<li>The walkthrough follows the <strong>inclusion tier</strong> (B consumes only
-				what JAM has already settled for A). Part I shows the whole round trip, Part II
-				the mechanisms behind it.</li>
+				<li>The walkthrough follows the <strong>inclusion tier</strong>: B consumes only
+				what JAM has already settled for A.</li>
 			</ul>`,
 		ref: 'SM (speculative-messaging-design.md) · PS (parachain-service-on-jam.md)',
 	},
 	{
 		id: 'intro',
-		stage: P1,
+		stage: S0,
 		title: 'The cast',
 		body: `
 			<ul>
@@ -51,14 +51,12 @@ export const steps = [
 				Refine plays the role of backing (runs the validation code on the PoV),
 				Accumulate the role of inclusion (enacts the candidate). Per parachain it keeps
 				a small <em>settlement ring</em> of recent roots.</li>
-			</ul>
-			<p>Where Part I compresses a mechanism, a numbered marker ①–⑤ appears; Part II
-			opens each one.</p>`,
+			</ul>`,
 		ref: 'PS §2 (architecture), §8 (messaging)',
 	},
 	{
 		id: 'anatomy',
-		stage: P1,
+		stage: S0,
 		title: 'Reading a stream id',
 		body: `
 			<ul>
@@ -74,25 +72,27 @@ export const steps = [
 			data and ack.</p>`,
 		ref: 'SM :330 (StreamId), :338 (reserved domain), :1672 (Channels)',
 	},
+	// ── Opening the channel ──
 	{
 		id: 'ov-open',
-		stage: P1,
+		stage: S1,
 		title: 'A opens the channel',
 		body: `
 			<ul>
 				<li><code>OpenChannel</code> becomes leaf #0 of A's data stream, the only message A
 				may send without credit. The channel is <em>Opening</em>.</li>
 				<li>A's block commits to all its streams with one hash, the new
-				<code>StreamsRoot</code> T<sub>A1</sub> ① (what the UMP <code>Provides</code> signal
+				<code>StreamsRoot</code> T<sub>A1</sub> (what the UMP <code>Provides</code> signal
 				carried on the relay chain). A's collator archives the payload.</li>
 				<li>The block goes through JAM, and T<sub>A1</sub> lands in A's settlement
-				ring ②.</li>
+				ring. How a root is built and settled is shown in detail with A's first data
+				block, further on.</li>
 			</ul>`,
 		ref: 'SM :1748 (Opening), :549 (commitments); PS host fn 204 (:802)',
 	},
 	{
 		id: 'ov-accept',
-		stage: P1,
+		stage: S1,
 		title: 'B accepts and grants credit',
 		body: `
 			<ul>
@@ -100,147 +100,33 @@ export const steps = [
 				extrinsic like <code>hrmp_accept_open_channel</code>, through B's collator.</li>
 				<li>B records the channel and appends a <code>Register</code> to its ack stream:
 				the watermark <code>up_to</code> and a credit grant for A.</li>
-				<li>That leaf is a send, so B commits T<sub>B1</sub> ①; B's collator archives it.</li>
-				<li>T<sub>B1</sub> settles in B's ring ②.</li>
+				<li>That leaf is a send, so B commits T<sub>B1</sub>; B's collator archives it.</li>
+				<li>T<sub>B1</sub> settles in B's ring.</li>
 			</ul>`,
 		ref: 'SM :1758 (accept), :1885 (Register)',
 	},
 	{
 		id: 'ov-read',
-		stage: P1,
+		stage: S1,
 		title: 'A reads the register; the channel is open',
 		body: `
 			<ul>
 				<li>A's collator watches B's ring. It moved: the newest root is T<sub>B1</sub>.</li>
-				<li>It fetches the head of B's ack stream, proven against T<sub>B1</sub> ③. The ack
+				<li>It fetches the head of B's ack stream, proven against T<sub>B1</sub>. The ack
 				stream is latest-wins: only the newest register counts, so A reads one leaf with an
 				inclusion proof.</li>
-				<li>The register enters A's next block through the messaging inherent ④. The
+				<li>The register enters A's next block through the messaging inherent. The
 				channel is open and A holds credit.</li>
 				<li>That block now depends on T<sub>B1</sub>: JAM enacts it only if
-				T<sub>B1</sub> is in B's ring ⑤. Since T<sub>B1</sub> is already settled, this
-				carries no risk from B's side; it is the same check ⑤ shows for B's block M.</li>
+				T<sub>B1</sub> is in B's ring. Since T<sub>B1</sub> is already settled, this
+				carries no risk from B's side. B's block M passes the same check later on.</li>
 			</ul>`,
 		ref: 'SM :1952 (reading the register)',
 	},
-	{
-		id: 'ov-send',
-		stage: P1,
-		title: 'A sends m<sub>1</sub> and m<sub>2</sub> in block N',
-		body: `
-			<ul>
-				<li>A's collator starts block N. In flight so far: <code>OpenChannel</code>, 1 of
-				16 messages.</li>
-				<li>Each <code>send</code> is checked against the credit; m<sub>1</sub> and
-				m<sub>2</sub> become leaves #1 and #2.</li>
-				<li>Block N commits T<sub>A2</sub> ①, also deposited as a header digest.</li>
-				<li>A's collator archives the payloads.</li>
-			</ul>`,
-		ref: 'SM :1593 (send), :694 (sender lifecycle)',
-	},
-	{
-		id: 'ov-settleN',
-		stage: P1,
-		title: 'Block N settles',
-		body: `
-			<p>Block N goes through JAM and T<sub>A2</sub> lands in A's ring ②. From now on,
-			anyone can depend on T<sub>A2</sub> without risk: it is settled.</p>`,
-		ref: 'PS §5.1 step 6',
-	},
-	{
-		id: 'ov-fetch',
-		stage: P1,
-		title: "B's collator fetches the messages",
-		body: `
-			<ul>
-				<li>B's collator watches A's ring: the newest root is T<sub>A2</sub>.</li>
-				<li>It asks A's collators for the data stream from #0, proven against
-				T<sub>A2</sub> ③. OpenChannel, m<sub>1</sub> and m<sub>2</sub> arrive with proofs and
-				are verified before they are trusted.</li>
-			</ul>
-			<p class="key"><strong>The key split.</strong> On-chain, the Parachain Service only
-			stores 32-byte roots, one per enacted block. The messages themselves and the
-			proofs that tie them to a root travel collator to collator, off-chain. That is
-			what keeps settlement cheap.</p>`,
-		ref: 'SM :820 (fetch protocol)',
-	},
-	{
-		id: 'ov-consume',
-		stage: P1,
-		title: 'B consumes them in block M',
-		body: `
-			<ul>
-				<li>B's block M takes the payloads through its messaging inherent ④.</li>
-				<li>B consumes them in order; its app receives m<sub>1</sub> and m<sub>2</sub>.</li>
-				<li>The block records what it consumed. It never sees a root.</li>
-			</ul>`,
-		ref: 'SM :1244 (consumption record)',
-	},
-	{
-		id: 'ov-settleM',
-		stage: P1,
-		title: 'Block M settles only because T<sub>A2</sub> did',
-		body: `
-			<ul>
-				<li>Block M goes to JAM. Its validation turns the consumption into a
-				requirement, "this block needs T<sub>A2</sub> of A" ④: the old UMP
-				<code>Requires</code>.</li>
-				<li>Accumulate enacts block M only if T<sub>A2</sub> is in A's ring ⑤. It is.</li>
-			</ul>`,
-		ref: 'PS §5.1 step 5',
-	},
-	{
-		id: 'ov-republish',
-		stage: P1,
-		title: 'B confirms with a new register',
-		body: `
-			<ul>
-				<li>Once consumption has advanced far enough (e.g. a quarter of the window) or an
-				age threshold passes, B appends a new <code>Register</code> with
-				<code>up_to 3</code>: everything before #3 is consumed.</li>
-				<li>That is a send: B commits T<sub>B2</sub> ① and archives the leaf.</li>
-				<li>T<sub>B2</sub> settles in B's ring ②.</li>
-			</ul>`,
-		ref: 'SM :1942 (publishing)',
-	},
-	{
-		id: 'ov-credit',
-		stage: P1,
-		title: 'Credit flows back to A',
-		body: `
-			<ul>
-				<li>A's collator reads the new register, proven against T<sub>B2</sub> ③.</li>
-				<li>A's next block imports it ④. In flight counts positions ≥ <code>up_to</code>,
-				so nothing is in flight any more: full credit again.</li>
-				<li>A may prune the archived payloads #0–#2 once that register is irreversible.
-				Read under a settled root, it is.</li>
-			</ul>`,
-		ref: 'SM :1937 (window accounting), :2039 (pruning)',
-	},
-	{
-		id: 'ov-legend',
-		stage: P1,
-		title: 'What the markers stand for',
-		body: `
-			<p>Every arrow in Part I hid one of five mechanisms. Part II opens them one at a
-			time on block N's messages.</p>`,
-		ref: '',
-	},
-
-	// ════════ Part II ════════
-	{
-		id: 'p2-rewind',
-		stage: C1,
-		title: 'Back to the moment the channel opened',
-		body: `
-			<p>Part II follows block N's messages again, this time opening each mechanism. The
-			scene is back to just after A read B's register: the channel is open, nothing has
-			been sent yet.</p>`,
-		ref: '',
-	},
+	// ── A sends block N ──
 	{
 		id: 's1-intro',
-		stage: C1,
+		stage: S2,
 		title: "A's collator starts block N",
 		body: `
 			<ul>
@@ -255,7 +141,7 @@ export const steps = [
 	},
 	{
 		id: 's1-send',
-		stage: C1,
+		stage: S2,
 		title: 'Two sends, each gated by credit',
 		body: `
 			<ul>
@@ -270,7 +156,7 @@ export const steps = [
 	},
 	{
 		id: 's1-bag',
-		stage: C1,
+		stage: S2,
 		title: 'Block end: bag the data stream',
 		body: `
 			<ul>
@@ -283,7 +169,7 @@ export const steps = [
 	},
 	{
 		id: 's1-fold',
-		stage: C1,
+		stage: S2,
 		title: 'Fold into one StreamsRoot',
 		body: `
 			<ul>
@@ -298,7 +184,7 @@ export const steps = [
 	},
 	{
 		id: 's1-outputs',
-		stage: C1,
+		stage: S2,
 		title: 'What leaves the block',
 		body: `
 			<ul>
@@ -312,9 +198,10 @@ export const steps = [
 			</ul>`,
 		ref: 'SM :728 (runtime API), :2039 (archive), :2573',
 	},
+	// ── Block N settles on JAM ──
 	{
 		id: 's2-package',
-		stage: C2,
+		stage: S3,
 		title: 'A work package for block N',
 		body: `
 			<ul>
@@ -329,7 +216,7 @@ export const steps = [
 	},
 	{
 		id: 's2-refine',
-		stage: C2,
+		stage: S3,
 		title: 'Refine re-executes block N',
 		body: `
 			<ul>
@@ -343,7 +230,7 @@ export const steps = [
 	},
 	{
 		id: 's2-join',
-		stage: C2,
+		stage: S3,
 		title: 'Guaranteed and available',
 		body: `
 			<ul>
@@ -355,7 +242,7 @@ export const steps = [
 	},
 	{
 		id: 's2-accumulate',
-		stage: C2,
+		stage: S3,
 		title: 'Accumulate checks, then enacts',
 		body: `
 			<ul>
@@ -364,13 +251,13 @@ export const steps = [
 				report whose own gas limit cannot cover it.</li>
 				<li>Checks 1–4 make sure block N extends A's current head with A's current code.</li>
 				<li>Check 5 is the messaging check. Block N requires nothing, so it passes
-				trivially; ⑤ shows a block where it matters.</li>
+				trivially; B's block M will be checked here for real.</li>
 			</ul>`,
 		ref: 'PS §5.1 (per-work-package work)',
 	},
 	{
 		id: 's2-enact',
-		stage: C2,
+		stage: S3,
 		title: "T<sub>A2</sub> lands in A's ring",
 		body: `
 			<ul>
@@ -381,9 +268,10 @@ export const steps = [
 			</ul>`,
 		ref: 'PS §5.1 step 6, §5.5 (head commitment), §8.1 (settlement ring)',
 	},
+	// ── B fetches the messages ──
 	{
 		id: 's3-notice',
-		stage: C3,
+		stage: S4,
 		title: "B's collator sees T<sub>A2</sub> in A's ring",
 		body: `
 			<ul>
@@ -399,7 +287,7 @@ export const steps = [
 	},
 	{
 		id: 's3-fetch',
-		stage: C3,
+		stage: S4,
 		title: 'Fetch by position, trust by root',
 		body: `
 			<ul>
@@ -409,12 +297,16 @@ export const steps = [
 				m<sub>2</sub>), an extension proof and a tree proof that tie them to T<sub>A2</sub>.</li>
 				<li>Addressing is by stream and position, never by block: B never has to look
 				for which of A's blocks wrote to its stream.</li>
-			</ul>`,
+			</ul>
+			<p class="key"><strong>The key split.</strong> On-chain, the Parachain Service only
+			stores 32-byte roots, one per enacted block. The messages themselves and the
+			proofs that tie them to a root travel collator to collator, off-chain. That is
+			what keeps settlement cheap.</p>`,
 		ref: 'SM :820 (fetch protocol)',
 	},
 	{
 		id: 's3-verify',
-		stage: C3,
+		stage: S4,
 		title: 'B verifies before it trusts anything',
 		body: `
 			<ul>
@@ -428,14 +320,15 @@ export const steps = [
 			</ul>`,
 		ref: 'SM :936 (verification)',
 	},
+	// ── B consumes them ──
 	{
 		id: 's4-inherent',
-		stage: C4,
+		stage: S5,
 		title: "B's collator starts block M",
 		body: `
 			<ul>
-				<li>The verified payloads go into block M's messaging inherent, like the
-				register went into A's block in Part I.</li>
+				<li>The verified payloads go into block M's messaging inherent, like the register
+				went into A's block during setup.</li>
 				<li>The inherent carries payloads only, never a StreamsRoot. A root chosen by
 				the block author would prove nothing to the runtime.</li>
 			</ul>`,
@@ -443,7 +336,7 @@ export const steps = [
 	},
 	{
 		id: 's4-consume',
-		stage: C4,
+		stage: S5,
 		title: 'B consumes #0–#2',
 		body: `
 			<ul>
@@ -460,7 +353,7 @@ export const steps = [
 	},
 	{
 		id: 's5-package',
-		stage: C4,
+		stage: S5,
 		title: 'Block M goes to JAM, with a lift',
 		body: `
 			<ul>
@@ -473,7 +366,7 @@ export const steps = [
 	},
 	{
 		id: 's5-refine',
-		stage: C4,
+		stage: S5,
 		title: 'The wrapper turns consumption into a requirement',
 		body: `
 			<ul>
@@ -488,9 +381,10 @@ export const steps = [
 			</ul>`,
 		ref: 'SM :1330 (build_requires); PS host fn 205 (:803)',
 	},
+	// ── Block M settles ──
 	{
 		id: 's5-settle',
-		stage: C5,
+		stage: S6,
 		title: "Check 5: is T<sub>A2</sub> in A's ring?",
 		body: `
 			<ul>
@@ -504,15 +398,46 @@ export const steps = [
 			</ul>`,
 		ref: 'PS §5.1 step 5, §8.1 (checking membership)',
 	},
+	// ── Credit flows back ──
 	{
-		id: 'p2-summary',
-		stage: C5,
+		id: 'ov-republish',
+		stage: S7,
+		title: 'B confirms with a new register',
+		body: `
+			<ul>
+				<li>Once consumption has advanced far enough (e.g. a quarter of the window) or an
+				age threshold passes, B appends a new <code>Register</code> with
+				<code>up_to 3</code>: everything before #3 is consumed.</li>
+				<li>That is a send: B commits T<sub>B2</sub> and archives the leaf.</li>
+				<li>T<sub>B2</sub> settles in B's ring.</li>
+			</ul>`,
+		ref: 'SM :1942 (publishing)',
+	},
+	{
+		id: 'ov-credit',
+		stage: S7,
+		title: 'Credit flows back to A',
+		body: `
+			<ul>
+				<li>A's collator reads the new register, proven against T<sub>B2</sub>.</li>
+				<li>A's next block imports it. In flight counts positions ≥ <code>up_to</code>,
+				so nothing is in flight any more: full credit again.</li>
+				<li>A may prune the archived payloads #0–#2 once that register is irreversible.
+				Read under a settled root, it is.</li>
+			</ul>`,
+		ref: 'SM :1937 (window accounting), :2039 (pruning)',
+	},
+	{
+		id: 'summary',
+		stage: S7,
 		title: 'The whole picture',
 		body: `
 			<ul>
-				<li>B's block M is enacted, and only because the root it depends on is settled.</li>
-				<li>The register travelled the other way through the same mechanisms: A read it
-				③ ④, and A's block had to pass check ⑤ against T<sub>B1</sub> in B's ring.</li>
+				<li>A sent m<sub>1</sub> and m<sub>2</sub>; B consumed them; B's register gave the
+				credit back; A pruned what it no longer needs.</li>
+				<li>The register travelled the other way through the same machinery: A fetched and
+				verified it, consumed it through an inherent, and A's block passed the settlement
+				check against T<sub>B1</sub> in B's ring.</li>
 				<li>On JAM: a few 32-byte roots per ring and a membership check per dependency.
 				Every payload and proof stayed with the two chains.</li>
 			</ul>`,

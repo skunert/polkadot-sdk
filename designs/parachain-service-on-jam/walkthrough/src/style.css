@@ -179,14 +179,6 @@ main {
 .check-line { fill: none; stroke: var(--off); stroke-width: 2.5; }
 #scene .pill.green text.mono-pill { font-family: var(--mono); font-size: 11px; }
 
-/* ①–⑤ markers, rewind banners, legend */
-.marker circle { fill: #2a2140; stroke: var(--jam); stroke-width: 1.5; }
-#scene .marker text { fill: var(--jam); font-size: 12px; font-weight: 700; }
-#scene .marker.big text { font-size: 13px; }
-#scene .lg-title { font-size: 14px; font-weight: 650; }
-.banner rect { fill: #2a2140; stroke: var(--jam); stroke-width: 1.5; }
-#scene .banner text { fill: var(--text); font-size: 13px; font-weight: 600; }
-
 /* Off-chain band: always faint, brightened by an overlay in the fetch step */
 .band { fill: var(--off); fill-opacity: 0.025; stroke: var(--off); stroke-opacity: 0.35; stroke-width: 1.5; stroke-dasharray: 8 6; }
 #scene .band-label { fill: var(--off); fill-opacity: 0.6; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; }

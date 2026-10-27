@@ -75,12 +75,6 @@ function beat(tl, clear) {
 	if (clear?.length) fadeOut(tl, clear)
 }
 
-// ①–⑤: shows (first time) and highlights the marker of a mechanism.
-function marker(tl, n, pos) {
-	tl.to(`#mk${n}`, { opacity: 1, duration: 0.3 }, pos)
-	pulse(tl, `#mk${n}`, '<', 1.5)
-}
-
 // A visible copy of each settlement motion path, drawn behind its token.
 const trails = document.getElementById('trails')
 for (const id of ['pA1', 'pA2', 'pA3', 'pA4', 'pA5', 'pB1', 'pB2', 'pB3', 'pB4', 'pB5']) {
@@ -163,60 +157,12 @@ function exchange(tl, req, reqPath, reqAt, resp, respPath, respAt, server) {
 	travel(tl, resp, respPath, 1.0)
 }
 
-// ── Rewinds: restore the scene as it was at an earlier step ─────
-// Part II and III start from earlier moments of Part I. `restore` captures
-// the scene at the clean end of that step (after its transients cleared) and
-// tweens every element that differs now back to it. Markers stay as they are:
-// once introduced they remain as anchors.
-
-const tracked = [...document.querySelectorAll('#scene [id]')]
-	.filter((el) => !el.closest('#paths') && !el.closest('.marker'))
-
-function capture() {
-	return tracked.map((el) => ({
-		opacity: Number(gsap.getProperty(el, 'opacity')),
-		x: Number(gsap.getProperty(el, 'x')) || 0,
-		y: Number(gsap.getProperty(el, 'y')) || 0,
-		scale: Number(gsap.getProperty(el, 'scale')) || 1,
-		dash: el.style.strokeDasharray,
-		offset: el.style.strokeDashoffset,
-		width: el.id === 'a-credit-fill' ? Number(el.getAttribute('width')) : null,
-	}))
-}
-
-const clean = {} // step id → timeline time of its clean end state
-
-function restore(tl, stepId) {
-	const now = tl.duration()
-	tl.seek(clean[stepId] - 1e-4, false)
-	const target = capture()
-	tl.seek(now, false)
-	const current = capture()
-	const at = tl.duration()
-	const round = (o) => (o < 0.01 ? 0 : o > 0.99 ? 1 : o)
-	tracked.forEach((el, i) => {
-		const t = target[i]
-		const c = current[i]
-		const vars = {}
-		if (Math.abs(t.opacity - c.opacity) > 0.01) vars.opacity = round(t.opacity)
-		if (Math.abs(t.x - c.x) > 0.5) vars.x = t.x
-		if (Math.abs(t.y - c.y) > 0.5) vars.y = t.y
-		if (Math.abs(t.scale - c.scale) > 0.01) vars.scale = t.scale
-		if (t.width !== null && Math.abs(t.width - c.width) > 0.1) vars.attr = { width: t.width }
-		if (Object.keys(vars).length) tl.to(el, { ...vars, duration: 0.8 }, at)
-		if (t.dash !== c.dash || t.offset !== c.offset) {
-			tl.set(el, { strokeDasharray: t.dash || 'none', strokeDashoffset: t.offset || 0 }, at)
-		}
-	})
-	tl.to({}, { duration: 0.8 }, at)
-}
-
 // ── The script, one builder per step ─────────────────────────────
 
-const OV = 0.55 // pace of the compressed mechanisms in Part I
+const OV = 0.55 // pace of the compressed settlements during channel setup
 
 const build = {
-	// ════════ Part I · The big picture ════════
+	// ════════ Introduction and channel setup ════════
 
 	goal(tl) {
 		tl.set('#goal', { opacity: 1 })
@@ -260,11 +206,9 @@ const build = {
 		drawLine(tl, '#a-fold', 0.5)
 		swap(tl, '#a-root-0', '#a-root-1')
 		pulse(tl, '#a-root-pill', '<')
-		marker(tl, 1, '<')
 		archiveSends(tl, 'a', [[0, 174, 138, 266]], OV)
 		beat(tl, ['#a-fold'])
 		const route = settleRoot(tl, 'A', 'pA', { speed: OV })
-		marker(tl, 2, '<')
 		return route
 	},
 
@@ -283,11 +227,9 @@ const build = {
 		drawLine(tl, '#b-fold', 0.5)
 		swap(tl, '#b-root-0', '#b-root-1')
 		pulse(tl, '#b-root-pill', '<')
-		marker(tl, 1, '<')
 		archiveSends(tl, 'b', [[0, 794, 210, 886]], OV)
 		beat(tl, ['#b-fold'])
 		const route = settleRoot(tl, 'B', 'pB', { speed: OV })
-		marker(tl, 2, '<')
 		return route
 	},
 
@@ -296,141 +238,22 @@ const build = {
 		drawLine(tl, '#read-line', 0.7)
 		beat(tl)
 		exchange(tl, '#req', '#pReq', [530, 399], '#resp', '#pResp', [655, 426], '#colB')
-		marker(tl, 3, '<')
 		fadeIn(tl, ['#a-fetched', '#fet-a0', '#fet-a0-ok'])
 		beat(tl, ['#read-line', '#req', '#resp', '#offchain-band-hi', '#a-fetched', '#fet-a0', '#fet-a0-ok'])
 		appear(tl, '#inh', 290, 411)
 		travel(tl, '#inh', '#pInh', 0.6)
-		marker(tl, 4, '<')
 		swap(tl, '#a-phase-opening', '#a-phase-open')
 		swap(tl, '#a-ack-none', '#a-ack-reg', '+=0.2')
 		beat(tl, ['#inh'])
-		marker(tl, 5)
-		pulse(tl, '#a-req-line', '<', 1.08)
+		pulse(tl, '#a-req-line', undefined, 1.08)
 	},
 
-	'ov-send'(tl) {
-		fadeOut(tl, '#a-req-line')
-		fadeIn(tl, ['#a-block', '#a-credit'], '<')
-		flash(tl, '#colA rect')
-		beat(tl)
-		fadeIn(tl, '#a-split')
-		sendData(tl, 1, 228, 15, 0.7)
-		sendData(tl, 2, 282, 22.5, 0.7)
-		beat(tl, ['#send-log1', '#send-log2'])
-		drawLine(tl, '#a-fold', 0.5)
-		swap(tl, '#a-root-1', '#a-root-2')
-		pulse(tl, '#a-root-pill', '<')
-		marker(tl, 1, '<')
-		fadeIn(tl, '#a-digest')
-		beat(tl, ['#a-fold'])
-		archiveSends(tl, 'a', [[1, 228, 138, 310], [2, 282, 138, 354]], OV)
-	},
+	// ════════ Block N's messages, in detail ════════
 
-	'ov-settleN'(tl) {
-		const route = settleRoot(tl, 'A', 'pA', { tok: '#tokA2', last: 5, ring: '#a-ring1', headX: 88, speed: OV })
-		marker(tl, 2, '<')
-		swap(tl, '#a-block', '#a-block-ok')
-		return route
-	},
-
-	'ov-fetch'(tl) {
-		pulse(tl, ['#a-ring1', '#a-head'], undefined, 1.25)
-		drawLine(tl, '#read-line2', 0.8)
-		beat(tl)
-		exchange(tl, '#mreq', '#pMReq', [670, 399], '#mresp', '#pMResp', [545, 426], '#colA')
-		marker(tl, 3, '<')
-		fadeIn(tl, ['#b-fetched', '#fet-b0', '#fet-b1', '#fet-b2', '#fet-b-ok'])
-		return ['#read-line2', '#mreq', '#mresp', '#offchain-band-hi']
-	},
-
-	'ov-consume'(tl) {
-		fadeIn(tl, '#b-block')
-		appear(tl, '#inhB', 910, 411)
-		travel(tl, '#inhB', '#pTx2', 0.6)
-		fadeOut(tl, ['#b-fetched', '#fet-b0', '#fet-b1', '#fet-b2', '#fet-b-ok'], '<')
-		marker(tl, 4, '<')
-		beat(tl, ['#inhB'])
-		addLeaf(tl, '#b-in0', '<')
-		addLeaf(tl, '#b-in1', '-=0.4')
-		addLeaf(tl, '#b-in2', '-=0.4')
-		swap(tl, '#b-front-0', '#b-front-3')
-		beat(tl)
-		fadeIn(tl, '#b-record')
-	},
-
-	'ov-settleM'(tl) {
-		appear(tl, '#wpB', 910, 411)
-		travelWithTrail(tl, '#wpB', 'pB2', 0.8)
-		flash(tl, '#refine rect')
-		travelWithTrail(tl, '#wpB', 'pB3', 0.5)
-		flash(tl, '#accumulate rect')
-		marker(tl, 4, '<')
-		beat(tl, ['#wpB', '#trail-pB2', '#trail-pB3'])
-		drawLine(tl, '#check-line', 0.8)
-		pulse(tl, '#a-ring1', undefined, 1.3)
-		fadeIn(tl, '#check-lbl')
-		marker(tl, 5, '<')
-		swap(tl, '#b-block', '#b-block-ok', '+=0.2')
-		return ['#check-line', '#check-lbl']
-	},
-
-	'ov-republish'(tl) {
-		fadeOut(tl, '#b-record')
-		addLeaf(tl, '#b-leaf1')
-		swap(tl, '#b-leaf0-detail', '#b-leaf1-detail')
-		beat(tl)
-		drawLine(tl, '#b-fold', 0.5)
-		swap(tl, '#b-root-1', '#b-root-2')
-		pulse(tl, '#b-root-pill', '<')
-		marker(tl, 1, '<')
-		archiveSends(tl, 'b', [[1, 848, 210, 930]], OV)
-		beat(tl, ['#b-fold'])
-		const route = settleRoot(tl, 'B', 'pB', { tok: '#tokB2', last: 5, ring: '#b-ring1', headX: 88, speed: OV })
-		marker(tl, 2, '<')
-		return route
-	},
-
-	'ov-credit'(tl) {
-		pulse(tl, ['#b-ring1', '#b-head'], undefined, 1.25)
-		drawLine(tl, '#read-line3', 0.7)
-		exchange(tl, '#req2', '#pReq', [530, 399], '#resp2', '#pResp', [655, 426], '#colB')
-		marker(tl, 3, '<')
-		fadeIn(tl, ['#a-fetched', '#fet-a1', '#fet-a1-ok'])
-		beat(tl, ['#read-line3', '#req2', '#resp2', '#offchain-band-hi', '#a-fetched', '#fet-a1', '#fet-a1-ok'])
-		appear(tl, '#inh2', 290, 411)
-		travel(tl, '#inh2', '#pInh', 0.6)
-		marker(tl, 4, '<')
-		swap(tl, ['#a-leaf1', '#a-leaf2'], ['#a-leaf1s', '#a-leaf2s'])
-		fadeOut(tl, '#a-split', '<')
-		swap(tl, '#a-ack-reg-l1', '#a-ack-reg2')
-		tl.to('#a-credit-fill', { attr: { width: 0.01 }, duration: 0.5 })
-		swap(tl, '#a-cr-3', '#a-cr-0', '<')
-		fadeIn(tl, '#a-req2')
-		beat(tl, ['#inh2'])
-		fadeOut(tl, ['#arc-a0', '#arc-a1', '#arc-a2'])
-		fadeIn(tl, '#arc-a-pruned', '+=0.1')
-	},
-
-	'ov-legend'(tl) {
-		tl.fromTo(['#legend', '#lg-r0', '#lg-r1', '#lg-r2', '#lg-r3', '#lg-r4'], { opacity: 0 }, { opacity: 1, duration: 0.4 })
-		pulse(tl, ['#mk1', '#mk2', '#mk3', '#mk4', '#mk5'], '+=0.2', 1.5)
-		return ['#legend']
-	},
-
-	// ════════ Part II · Under the hood, on block N's messages ════════
-
-	'p2-rewind'(tl) {
-		restore(tl, 'ov-read')
-		fadeIn(tl, '#rw1')
-		return ['#rw1']
-	},
-
-	// ① Commit
+	// A sends block N
 
 	's1-intro'(tl) {
-		marker(tl, 1)
-		fadeOut(tl, '#a-req-line', '<') // consumption records are per block
+		fadeOut(tl, '#a-req-line') // consumption records are per block
 		fadeIn(tl, '#a-block', '<')
 		flash(tl, '#colA rect')
 		flash(tl, '#chainA .box')
@@ -477,11 +300,10 @@ const build = {
 		archiveSends(tl, 'a', [[1, 228, 138, 310], [2, 282, 138, 354]])
 	},
 
-	// ② Settle
+	// Block N settles on JAM
 
 	's2-package'(tl) {
-		marker(tl, 2)
-		flash(tl, '#colA rect', '<')
+		flash(tl, '#colA rect')
 		appear(tl, '#wp', 290, 411)
 		travelWithTrail(tl, '#wp', 'pA2', 1.2)
 		flash(tl, '#refine rect')
@@ -531,11 +353,10 @@ const build = {
 		return ['#trail-pA5']
 	},
 
-	// ③ Fetch & verify
+	// B fetches the messages
 
 	's3-notice'(tl) {
-		marker(tl, 3)
-		pulse(tl, ['#a-ring1', '#a-head'], '<', 1.25)
+		pulse(tl, ['#a-ring1', '#a-head'], undefined, 1.25)
 		drawLine(tl, '#read-line2', 1)
 		flash(tl, '#colB rect')
 	},
@@ -559,11 +380,10 @@ const build = {
 		return ['#vf-card']
 	},
 
-	// ④ Consume & lift
+	// B consumes them
 
 	's4-inherent'(tl) {
-		marker(tl, 4)
-		fadeIn(tl, '#b-block', '<')
+		fadeIn(tl, '#b-block')
 		flash(tl, '#colB rect')
 		appear(tl, '#inhB', 910, 411)
 		travel(tl, '#inhB', '#pTx2', 0.8)
@@ -600,11 +420,10 @@ const build = {
 		return ['#rf2-card']
 	},
 
-	// ⑤ Settlement check
+	// Block M settles
 
 	's5-settle'(tl) {
-		marker(tl, 5)
-		fadeOut(tl, '#refine-wpB', '<')
+		fadeOut(tl, '#refine-wpB')
 		appear(tl, '#dgB', 580, 584)
 		travelWithTrail(tl, '#dgB', 'pB3', 1.0)
 		flash(tl, '#accumulate rect')
@@ -618,25 +437,57 @@ const build = {
 		return ['#trail-pB3', '#acc-digestB', '#check-line', '#check-lbl']
 	},
 
-	'p2-summary'(tl) {
-		pulse(tl, ['#mk1', '#mk2', '#mk3', '#mk4', '#mk5'], undefined, 1.5)
-		pulse(tl, ['#a-ring1', '#b-ring0'], '+=0.1', 1.25)
+	// Credit flows back
+
+	'ov-republish'(tl) {
+		fadeOut(tl, '#b-record')
+		addLeaf(tl, '#b-leaf1')
+		swap(tl, '#b-leaf0-detail', '#b-leaf1-detail')
+		beat(tl)
+		drawLine(tl, '#b-fold', 0.5)
+		swap(tl, '#b-root-1', '#b-root-2')
+		pulse(tl, '#b-root-pill', '<')
+		archiveSends(tl, 'b', [[1, 848, 210, 930]], OV)
+		beat(tl, ['#b-fold'])
+		const route = settleRoot(tl, 'B', 'pB', { tok: '#tokB2', last: 5, ring: '#b-ring1', headX: 88, speed: OV })
+		return route
+	},
+
+	'ov-credit'(tl) {
+		pulse(tl, ['#b-ring1', '#b-head'], undefined, 1.25)
+		drawLine(tl, '#read-line3', 0.7)
+		exchange(tl, '#req2', '#pReq', [530, 399], '#resp2', '#pResp', [655, 426], '#colB')
+		fadeIn(tl, ['#a-fetched', '#fet-a1', '#fet-a1-ok'])
+		beat(tl, ['#read-line3', '#req2', '#resp2', '#offchain-band-hi', '#a-fetched', '#fet-a1', '#fet-a1-ok'])
+		appear(tl, '#inh2', 290, 411)
+		travel(tl, '#inh2', '#pInh', 0.6)
+		swap(tl, ['#a-leaf1', '#a-leaf2'], ['#a-leaf1s', '#a-leaf2s'])
+		fadeOut(tl, '#a-split', '<')
+		swap(tl, '#a-ack-reg-l1', '#a-ack-reg2')
+		tl.to('#a-credit-fill', { attr: { width: 0.01 }, duration: 0.5 })
+		swap(tl, '#a-cr-3', '#a-cr-0', '<')
+		fadeIn(tl, '#a-req2')
+		beat(tl, ['#inh2'])
+		fadeOut(tl, ['#arc-a0', '#arc-a1', '#arc-a2'])
+		fadeIn(tl, '#arc-a-pruned', '+=0.1')
+	},
+
+	summary(tl) {
+		pulse(tl, ['#a-ring0', '#a-ring1', '#b-ring0', '#b-ring1'], undefined, 1.25)
+		pulse(tl, ['#a-block-ok', '#b-block-ok'], '+=0.1')
 	},
 }
 
 const tl = gsap.timeline({ paused: true })
 const marks = {} // step id → beat boundaries inside the step
 let leftovers = []
-let prevId = null
 for (const s of steps) {
 	tl.addLabel(s.id)
 	if (leftovers.length) fadeOut(tl, leftovers)
-	if (prevId) clean[prevId] = tl.duration()
 	beatMarks = []
 	leftovers = build[s.id](tl) ?? []
 	marks[s.id] = beatMarks
 	tl.to({}, { duration: 0.15 }) // breathing room before the step ends
-	prevId = s.id
 }
 
 const starts = steps.map((s) => tl.labels[s.id])

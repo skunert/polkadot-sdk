@@ -378,16 +378,6 @@
 		<text class="mono-pill" y="4" text-anchor="middle">(A, T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>) is in A's ring ✓</text>
 	</g>
 
-	<!-- ①–⑤: where Part I compresses a mechanism that Part II opens up -->
-	<g id="mk1" class="marker" transform="translate(515,57)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">1</text></g>
-	<g id="mk2" class="marker" transform="translate(455,634)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">2</text></g>
-	<g id="mk3" class="marker" transform="translate(600,361)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">3</text></g>
-	<g id="mk4" class="marker" transform="translate(1140,300)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">4</text></g>
-	<g id="mk5" class="marker" transform="translate(455,696)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">5</text></g>
-
-	<!-- Banners for the scene rewinds between the parts -->
-	<g id="rw1" class="banner" style="opacity:0"><rect x="300" y="762" width="600" height="30" rx="15" /><text x="600" y="782" text-anchor="middle">◀◀ Back to: channel open, block N not yet authored</text></g>
-
 	<!-- ───────────── Stream id explainer (modal card) ───────────── -->
 	<g id="anatomy" style="opacity:0">
 		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
@@ -566,19 +556,6 @@
 		<g id="rf2-r4" class="rf-row hot" style="opacity:0"><rect class="row-hi" x="192" y="422" width="816" height="26" rx="6" /><text class="mono" x="200" y="440">205 set_messages_requires_roots</text><text class="arrow" x="590" y="440">→</text><text class="mono" x="620" y="440">requires_roots: [(A, T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>)]</text></g>
 		<g id="rf2-r5" class="rf-row" style="opacity:0"><text class="mono dim" x="200" y="470">204 not called: block M sent nothing</text><text class="arrow" x="590" y="470">→</text><text class="mono" x="620" y="470">messages_streams_root: None</text></g>
 		<text id="rf2-foot" class="hint" x="200" y="580" style="opacity:0">the lift is public data: anyone can rebuild it from A's streams and roots, so any collator can complete the candidate</text>
-	</g>
-
-	<!-- ───────────── Part I closing card: the five mechanisms ───────────── -->
-	<g id="legend" style="opacity:0">
-		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
-		<rect class="card" x="170" y="240" width="860" height="350" rx="16" />
-		<text class="title" x="200" y="280">Five mechanisms behind the arrows</text>
-		<text class="sub" x="200" y="302">Part I showed each of them compressed. Part II opens them one by one.</text>
-		<g id="lg-r0" style="opacity:0"><g class="marker big" transform="translate(215,338)"><circle r="12" /><text y="4" text-anchor="middle">1</text></g><text class="lg-title" x="240" y="343">Commit</text><text x="430" y="343">a block folds every stream it touched into one StreamsRoot</text></g>
-		<g id="lg-r1" style="opacity:0"><g class="marker big" transform="translate(215,380)"><circle r="12" /><text y="4" text-anchor="middle">2</text></g><text class="lg-title" x="240" y="385">Settle</text><text x="430" y="385">work package → Refine → Accumulate: the root lands in the sender's ring</text></g>
-		<g id="lg-r2" style="opacity:0"><g class="marker big" transform="translate(215,422)"><circle r="12" /><text y="4" text-anchor="middle">3</text></g><text class="lg-title" x="240" y="427">Fetch &amp; verify</text><text x="430" y="427">collators exchange payloads and proofs, checked against a settled root</text></g>
-		<g id="lg-r3" style="opacity:0"><g class="marker big" transform="translate(215,464)"><circle r="12" /><text y="4" text-anchor="middle">4</text></g><text class="lg-title" x="240" y="469">Consume &amp; lift</text><text x="430" y="469">the receiving block records what it consumed; validation lifts that to a root</text></g>
-		<g id="lg-r4" style="opacity:0"><g class="marker big" transform="translate(215,506)"><circle r="12" /><text y="4" text-anchor="middle">5</text></g><text class="lg-title" x="240" y="511">Settlement check</text><text x="430" y="511">Accumulate enacts the block only if that root is in the sender's ring</text></g>
 	</g>
 
 	<!-- ───────────── Goal card (very first step) ───────────── -->
