@@ -1,47 +1,64 @@
 // Narration for each step. `id` doubles as the timeline label in main.js.
 // Refs: SM = speculative-messaging-design.md, PS = parachain-service-on-jam.md.
 // The scene shows *what* changes; the panel explains *why*.
+//
+// Structure: Part I runs the whole round trip at actor level and marks every
+// compressed mechanism ①–⑤. Part II rewinds and opens each mechanism on block
+// N's messages.
 
-const stage = 'Stage 0 · Channel setup'
-const stage1 = 'Stage 1 · A authors a block'
-const stage2 = 'Stage 2 · Block N through JAM'
-const stage3 = 'Stage 3 · B fetches the messages'
-const stage4 = 'Stage 4 · B consumes them'
-const stage5 = "Stage 5 · B's block settles"
-const stage6 = 'Stage 6 · Credit flows back to A'
+const P1 = 'Part I · The big picture'
+const C1 = 'Part II · ① Commit'
+const C2 = 'Part II · ② Settle'
+const C3 = 'Part II · ③ Fetch & verify'
+const C4 = 'Part II · ④ Consume & lift'
+const C5 = 'Part II · ⑤ Settlement check'
+
+// Labels of the stage buttons in the panel.
+export const chips = { [P1]: 'I', [C1]: '①', [C2]: '②', [C3]: '③', [C4]: '④', [C5]: '⑤' }
 
 export const steps = [
+	// ════════ Part I ════════
 	{
 		id: 'goal',
-		stage: 'Overview',
+		stage: P1,
 		title: 'Messages between two parachains',
 		body: `
 			<p><strong>Goal:</strong> parachain A sends messages to parachain B.</p>
 			<ul>
-				<li>Messages travel over a <strong>channel</strong>. Channels are unidirectional:
-				A→B lets A write and B read. Replies would need a second channel B→A.</li>
-				<li>The chains exchange the messages themselves off-chain. JAM's Parachain
-				Service only settles 32-byte roots that commit to them.</li>
-				<li>This walkthrough follows the <strong>inclusion tier</strong>: B consumes only
-				what JAM has already settled for A.</li>
+				<li>Think of it as the successor of HRMP, except that messages never pass
+				through the relay chain (here: JAM). The chains exchange them directly; JAM only
+				settles 32-byte roots that commit to them.</li>
+				<li>Messages travel over a <strong>channel</strong>. A→B lets A write and B read.</li>
+				<li>Channels are unidirectional: replies would need a second channel B→A.</li>
+				<li>The walkthrough follows the <strong>inclusion tier</strong> (B consumes only
+				what JAM has already settled for A). Part I shows the whole round trip, Part II
+				the mechanisms behind it.</li>
 			</ul>`,
 		ref: 'SM (speculative-messaging-design.md) · PS (parachain-service-on-jam.md)',
 	},
 	{
 		id: 'intro',
-		stage,
-		title: 'Before any data flows, A and B need a channel',
+		stage: P1,
+		title: 'The cast',
 		body: `
-			<p>A wants to send messages to B. A channel is a pair of streams:
-			<strong>data</strong>, written by A and read by B, and <strong>ack</strong>,
-			written by B and read by A.</p>
-			<p>Everything in this stage is parachain runtime and collator work. The
-			Parachain Service on JAM only ever settles roots.</p>`,
-		ref: 'SM §Channels and Flow Control',
+			<ul>
+				<li><strong>Parachains A and B</strong>: their runtimes keep the message
+				streams. A channel is a pair of streams: <em>data</em> (A writes, B reads)
+				and <em>ack</em> (B writes, A reads).</li>
+				<li><strong>Collators</strong> build blocks as today, and talk to each other
+				directly to move messages.</li>
+				<li><strong>JAM's Parachain Service</strong> takes over from the relay chain.
+				Refine plays the role of backing (runs the validation code on the PoV),
+				Accumulate the role of inclusion (enacts the candidate). Per parachain it keeps
+				a small <em>settlement ring</em> of recent roots.</li>
+			</ul>
+			<p>Where Part I compresses a mechanism, a numbered marker ①–⑤ appears; Part II
+			opens each one.</p>`,
+		ref: 'PS §2 (architecture), §8 (messaging)',
 	},
 	{
 		id: 'anatomy',
-		stage,
+		stage: P1,
 		title: 'Reading a stream id',
 		body: `
 			<ul>
@@ -58,146 +75,172 @@ export const steps = [
 		ref: 'SM :330 (StreamId), :338 (reserved domain), :1672 (Channels)',
 	},
 	{
-		id: 'open',
-		stage,
+		id: 'ov-open',
+		stage: P1,
 		title: 'A opens the channel',
 		body: `
 			<ul>
-				<li><code>OpenChannel</code> becomes leaf #0 of A's data stream. It is the only
-				message A may send without credit, because B has not granted any yet.</li>
-				<li>A's channel state (<code>OutChannels</code>) starts in phase
-				<em>Opening</em>: no register from B yet.</li>
-				<li>Nothing reaches B. How A's wish to open is communicated is outside the
-				transport; B decides on its own whether to accept.</li>
+				<li><code>OpenChannel</code> becomes leaf #0 of A's data stream, the only message A
+				may send without credit. The channel is <em>Opening</em>.</li>
+				<li>A's block commits to all its streams with one hash, the new
+				<code>StreamsRoot</code> T<sub>A1</sub> ① (what the UMP <code>Provides</code> signal
+				carried on the relay chain). A's collator archives the payload.</li>
+				<li>The block goes through JAM, and T<sub>A1</sub> lands in A's settlement
+				ring ②.</li>
 			</ul>`,
-		ref: 'SM :1748 (Opening)',
+		ref: 'SM :1748 (Opening), :549 (commitments); PS host fn 204 (:802)',
 	},
 	{
-		id: 'commitA',
-		stage,
-		title: "A's new root settles on JAM",
+		id: 'ov-accept',
+		stage: P1,
+		title: 'B accepts and grants credit',
 		body: `
 			<ul>
-				<li>Appending a leaf changes the data stream's MMR root, which folds into A's
-				commitment trie: the new <code>StreamsRoot</code> T<sub>A1</sub>.</li>
-				<li>A's collator copies the block's sends into its node-local archive
-				(via <code>outbound_messages()</code>): position #0, <code>OpenChannel</code>.</li>
-				<li>In Refine, A's validation code declares the root via host fn 204.
-				Accumulate enacts the block and pushes the root into A's settlement ring.</li>
-				<li>Settlement is per root: the service never learns which stream changed,
-				or that a channel exists at all.</li>
+				<li>Someone on B submits <code>accept_open_channel(A, 0, 0)</code>, a signed
+				extrinsic like <code>hrmp_accept_open_channel</code>, through B's collator.</li>
+				<li>B records the channel and appends a <code>Register</code> to its ack stream:
+				the watermark <code>up_to</code> and a credit grant for A.</li>
+				<li>That leaf is a send, so B commits T<sub>B1</sub> ①; B's collator archives it.</li>
+				<li>T<sub>B1</sub> settles in B's ring ②.</li>
 			</ul>`,
-		ref: 'PS host fn 204 (:802), §8.1 Settlement Ring',
+		ref: 'SM :1758 (accept), :1885 (Register)',
 	},
 	{
-		id: 'accept',
-		stage,
-		title: 'Someone on B submits accept_open_channel',
+		id: 'ov-read',
+		stage: P1,
+		title: 'A reads the register; the channel is open',
 		body: `
 			<ul>
-				<li>Accepting is a signed transaction on B, the analog of
-				<code>hrmp_accept_open_channel</code>. It reaches B's runtime like any other
-				extrinsic: B's collator includes it in B's next block.</li>
-				<li>There is no push path and no <code>AcceptChannel</code> signal from A's side.</li>
-				<li>B's policy decides the origin and any deposit.</li>
-				<li>Order is free: B may accept before A opens, or A's open leaf may wait
-				until B accepts.</li>
+				<li>A's collator watches B's ring. It moved: the newest root is T<sub>B1</sub>.</li>
+				<li>It fetches the head of B's ack stream, proven against T<sub>B1</sub> ③. The ack
+				stream is latest-wins: only the newest register counts, so A reads one leaf with an
+				inclusion proof.</li>
+				<li>The register enters A's next block through the messaging inherent ④. The
+				channel is open and A holds credit.</li>
+				<li>That block now depends on T<sub>B1</sub>: JAM enacts it only if
+				T<sub>B1</sub> is in B's ring ⑤. Since T<sub>B1</sub> is already settled, this
+				carries no risk from B's side; it is the same check ⑤ shows for B's block M.</li>
 			</ul>`,
-		ref: 'SM :1758',
+		ref: 'SM :1952 (reading the register)',
 	},
 	{
-		id: 'publishB',
-		stage,
-		title: 'B accepts and publishes its first Register',
+		id: 'ov-send',
+		stage: P1,
+		title: 'A sends m<sub>1</sub> and m<sub>2</sub> in block N',
 		body: `
 			<ul>
-				<li>B records the channel in <code>InChannels</code> and starts reading A's
-				data stream from #0.</li>
-				<li>B's ack stream gets a <code>Register</code> as leaf #0. Its grant is A's
-				credit: absolute limits on messages, bytes and message size beyond
-				<code>up_to</code>.</li>
-				<li>B enforces nothing. A gates its own sends on the grant, which bounds
-				A's archive and surfaces backpressure to A's applications.</li>
+				<li>A's collator starts block N. In flight so far: <code>OpenChannel</code>, 1 of
+				16 messages.</li>
+				<li>Each <code>send</code> is checked against the credit; m<sub>1</sub> and
+				m<sub>2</sub> become leaves #1 and #2.</li>
+				<li>Block N commits T<sub>A2</sub> ①, also deposited as a header digest.</li>
+				<li>A's collator archives the payloads.</li>
 			</ul>`,
-		ref: 'SM :1741 (WindowGrant)',
+		ref: 'SM :1593 (send), :694 (sender lifecycle)',
 	},
 	{
-		id: 'commitB',
-		stage,
-		title: "Publishing is a send, so B's root moves too",
+		id: 'ov-settleN',
+		stage: P1,
+		title: 'Block N settles',
 		body: `
-			<p>Same path as A's: new <code>StreamsRoot</code> T<sub>B1</sub>, host fn 204
-			in Refine, enactment in Accumulate, push into B's settlement ring.</p>
-			<p>B's collator archives the Register leaf, so it can serve it to A later.</p>`,
+			<p>Block N goes through JAM and T<sub>A2</sub> lands in A's ring ②. From now on,
+			anyone can depend on T<sub>A2</sub> without risk: it is settled.</p>`,
 		ref: 'PS §5.1 step 6',
 	},
 	{
-		id: 'notice',
-		stage,
-		title: "A's collator notices B's ring moved",
+		id: 'ov-fetch',
+		stage: P1,
+		title: "B's collator fetches the messages",
 		body: `
 			<ul>
-				<li>Every JAM block, A's collator reads B's ring head
-				(<code>messages_cursor</code>, tag 0x09). It advanced, and the new root
-				T<sub>B1</sub> sits right behind it (<code>messages_queue</code>, tag 0x0b).</li>
-				<li>A root change does not say which stream moved, so A asks for each stream
-				it reads from B: here only the ack stream.</li>
-			</ul>`,
-		ref: 'PS storage tags (:523)',
-	},
-	{
-		id: 'fetch',
-		stage,
-		title: 'Fetch the register under the enacted root',
-		body: `
-			<ul>
-				<li>The request names a stream and a root:
-				<code>EventRequest{stream: Ack{A,0,0}, at: None, under: T<sub>B1</sub>}</code>.</li>
-				<li>The response is the leaf with an MMR inclusion proof and a tree proof.
-				A's collator checks them against exactly T<sub>B1</sub>: trust is keyed by
-				root, never by block.</li>
+				<li>B's collator watches A's ring: the newest root is T<sub>A2</sub>.</li>
+				<li>It asks A's collators for the data stream from #0, proven against
+				T<sub>A2</sub> ③. OpenChannel, m<sub>1</sub> and m<sub>2</sub> arrive with proofs and
+				are verified before they are trusted.</li>
 			</ul>
 			<p class="key"><strong>The key split.</strong> On-chain, the Parachain Service only
 			stores 32-byte roots, one per enacted block. The messages themselves and the
 			proofs that tie them to a root travel collator to collator, off-chain. That is
 			what keeps settlement cheap.</p>`,
-		ref: 'SM :905 (EventRequest), :1952',
+		ref: 'SM :820 (fetch protocol)',
 	},
 	{
-		id: 'import',
-		stage,
-		title: 'A imports the register; the channel is Open',
+		id: 'ov-consume',
+		stage: P1,
+		title: 'B consumes them in block M',
 		body: `
 			<ul>
-				<li>A's collator puts the leaf and its proof into A's next block as the
-				messaging inherent, the collator-made counterpart of B's accept tx. A's runtime
-				verifies again and stores the register in <code>OutChannels</code>: the channel
-				is Open, and A holds credit to send data.</li>
-				<li>Reading B's ack stream is itself a consumption. A's validation will emit
-				<code>requires (B, T<sub>B1</sub>)</code> via host fn 205, so A's block only
-				settles while T<sub>B1</sub> is in B's ring.</li>
+				<li>B's block M takes the payloads through its messaging inherent ④.</li>
+				<li>B consumes them in order; its app receives m<sub>1</sub> and m<sub>2</sub>.</li>
+				<li>The block records what it consumed. It never sees a root.</li>
 			</ul>`,
-		ref: 'PS host fn 205 (:803)',
+		ref: 'SM :1244 (consumption record)',
 	},
 	{
-		id: 'summary',
-		stage,
-		title: 'What the Parachain Service saw',
+		id: 'ov-settleM',
+		stage: P1,
+		title: 'Block M settles only because T<sub>A2</sub> did',
 		body: `
-			<p>Two roots: T<sub>A1</sub> in A's ring and T<sub>B1</sub> in B's ring. Nothing else.</p>
 			<ul>
-				<li>Frontiers are eternal. Close and reopen touch only channel state,
-				so there are no channel epochs.</li>
-				<li>From the first register read onward, A depends on B's roots.</li>
-			</ul>
-			<p>Next: Stage 1, A authors a block with data.</p>`,
+				<li>Block M goes to JAM. Its validation turns the consumption into a
+				requirement, "this block needs T<sub>A2</sub> of A" ④: the old UMP
+				<code>Requires</code>.</li>
+				<li>Accumulate enacts block M only if T<sub>A2</sub> is in A's ring ⑤. It is.</li>
+			</ul>`,
+		ref: 'PS §5.1 step 5',
+	},
+	{
+		id: 'ov-republish',
+		stage: P1,
+		title: 'B confirms with a new register',
+		body: `
+			<ul>
+				<li>Once consumption has advanced far enough (e.g. a quarter of the window) or an
+				age threshold passes, B appends a new <code>Register</code> with
+				<code>up_to 3</code>: everything before #3 is consumed.</li>
+				<li>That is a send: B commits T<sub>B2</sub> ① and archives the leaf.</li>
+				<li>T<sub>B2</sub> settles in B's ring ②.</li>
+			</ul>`,
+		ref: 'SM :1942 (publishing)',
+	},
+	{
+		id: 'ov-credit',
+		stage: P1,
+		title: 'Credit flows back to A',
+		body: `
+			<ul>
+				<li>A's collator reads the new register, proven against T<sub>B2</sub> ③.</li>
+				<li>A's next block imports it ④. In flight counts positions ≥ <code>up_to</code>,
+				so nothing is in flight any more: full credit again.</li>
+				<li>A may prune the archived payloads #0–#2 once that register is irreversible.
+				Read under a settled root, it is.</li>
+			</ul>`,
+		ref: 'SM :1937 (window accounting), :2039 (pruning)',
+	},
+	{
+		id: 'ov-legend',
+		stage: P1,
+		title: 'What the markers stand for',
+		body: `
+			<p>Every arrow in Part I hid one of five mechanisms. Part II opens them one at a
+			time on block N's messages.</p>`,
 		ref: '',
 	},
 
-	// ── Stage 1 ──
+	// ════════ Part II ════════
+	{
+		id: 'p2-rewind',
+		stage: C1,
+		title: 'Back to the moment the channel opened',
+		body: `
+			<p>Part II follows block N's messages again, this time opening each mechanism. The
+			scene is back to just after A read B's register: the channel is open, nothing has
+			been sent yet.</p>`,
+		ref: '',
+	},
 	{
 		id: 's1-intro',
-		stage: stage1,
+		stage: C1,
 		title: "A's collator starts block N",
 		body: `
 			<ul>
@@ -212,7 +255,7 @@ export const steps = [
 	},
 	{
 		id: 's1-send',
-		stage: stage1,
+		stage: C1,
 		title: 'Two sends, each gated by credit',
 		body: `
 			<ul>
@@ -227,20 +270,20 @@ export const steps = [
 	},
 	{
 		id: 's1-bag',
-		stage: stage1,
+		stage: C1,
 		title: 'Block end: bag the data stream',
 		body: `
 			<ul>
-				<li>In memory, the runtime appends this block's leaves to the frontier: #1 merges
-				with #0 into a peak, #2 starts a new one.</li>
+				<li>Each stream is a Merkle Mountain Range. In memory, the runtime appends this
+				block's leaves to the frontier: #1 merges with #0 into a peak, #2 starts a new one.</li>
 				<li>Bagging the peaks gives the data stream's MMR root. No stream root is stored
 				anywhere; it is always recomputed from the frontier.</li>
 			</ul>`,
-		ref: 'SM :640 (MmrFrontier), :694 (sender lifecycle)',
+		ref: 'SM :197 (MMR), :640 (MmrFrontier), :694 (sender lifecycle)',
 	},
 	{
 		id: 's1-fold',
-		stage: stage1,
+		stage: C1,
 		title: 'Fold into one StreamsRoot',
 		body: `
 			<ul>
@@ -255,42 +298,23 @@ export const steps = [
 	},
 	{
 		id: 's1-outputs',
-		stage: stage1,
+		stage: C1,
 		title: 'What leaves the block',
 		body: `
 			<ul>
 				<li>T<sub>A2</sub> is deposited as A's header digest
 				(<code>DigestItem::Consensus</code>, at most one per header).</li>
 				<li>A's collator pulls the block's sends through the runtime API
-				<code>outbound_messages()</code> and appends them to its archive at positions
-				#1 and #2. Collators never read messaging storage directly.</li>
+				<code>outbound_messages()</code> into its archive at #1 and #2. Collators never
+				read messaging storage directly.</li>
 				<li>The archive is node-local disk, not chain state: the runtime keeps only the
-				frontier. B's collators will fetch m<sub>1</sub> and m<sub>2</sub> from here, and A may
-				prune them only once B's register confirms consumption.</li>
+				frontier. At block N+1 init the frontier absorbs #1 and #2.</li>
 			</ul>`,
-		ref: 'SM :728 (runtime API), :2039 (archive pruning), :2573',
+		ref: 'SM :728 (runtime API), :2039 (archive), :2573',
 	},
-	{
-		id: 's1-summary',
-		stage: stage1,
-		title: 'Block N is sealed; JAM knows nothing yet',
-		body: `
-			<ul>
-				<li>Off-chain: m<sub>1</sub> and m<sub>2</sub> in A's archive, T<sub>A2</sub> in
-				A's header.</li>
-				<li>On-chain: A's ring still holds only T<sub>A1</sub>. T<sub>A2</sub> lands
-				there once JAM enacts block N.</li>
-				<li>At block N+1 init, the frontier absorbs #1 and #2 and
-				<code>OutboundMessages</code> is cleared, in one step.</li>
-			</ul>
-			<p>Next: Stage 2, A's collator submits block N to JAM.</p>`,
-		ref: '',
-	},
-
-	// ── Stage 2 ──
 	{
 		id: 's2-package',
-		stage: stage2,
+		stage: C2,
 		title: 'A work package for block N',
 		body: `
 			<ul>
@@ -305,12 +329,12 @@ export const steps = [
 	},
 	{
 		id: 's2-refine',
-		stage: stage2,
+		stage: C2,
 		title: 'Refine re-executes block N',
 		body: `
 			<ul>
-				<li>Refine takes the para id from the authorizer config, fetches the validation
-				code by hash and runs <code>jam_validate_block</code> in a child PVM.</li>
+				<li>Refine is the backing step: it fetches the validation code by hash and runs
+				<code>jam_validate_block</code> in a child PVM on the PoV.</li>
 				<li>The validation code reports through host calls. 200 and 201 are mandatory;
 				204 declares T<sub>A2</sub>, the same root block N put in its header digest.</li>
 				<li>205 is not called: block N consumed nothing, so it depends on no other chain.</li>
@@ -319,7 +343,7 @@ export const steps = [
 	},
 	{
 		id: 's2-join',
-		stage: stage2,
+		stage: C2,
 		title: 'Guaranteed and available',
 		body: `
 			<ul>
@@ -331,52 +355,35 @@ export const steps = [
 	},
 	{
 		id: 's2-accumulate',
-		stage: stage2,
+		stage: C2,
 		title: 'Accumulate checks, then enacts',
 		body: `
 			<ul>
-				<li>Each report pays for itself: the gas gate skips any report whose own gas
-				limit cannot cover it.</li>
+				<li>Accumulate is the inclusion step, the counterpart of
+				<code>enact_candidate</code>. Each report pays for itself: the gas gate skips any
+				report whose own gas limit cannot cover it.</li>
 				<li>Checks 1–4 make sure block N extends A's current head with A's current code.</li>
 				<li>Check 5 is the messaging check. Block N requires nothing, so it passes
-				trivially. A block that consumed messages is checked here against the
-				senders' rings.</li>
+				trivially; ⑤ shows a block where it matters.</li>
 			</ul>`,
 		ref: 'PS §5.1 (per-work-package work)',
 	},
 	{
 		id: 's2-enact',
-		stage: stage2,
+		stage: C2,
 		title: "T<sub>A2</sub> lands in A's ring",
 		body: `
 			<ul>
 				<li>Enactment writes block N's head data and pushes T<sub>A2</sub> at the ring's
 				head. The head moves on to the next free slot.</li>
-				<li>Accumulate also returns a Merkle root over the heads it changed. That root is
-				JAM's commitment to the new head of A.</li>
+				<li>The ring keeps the last 64 roots. Accumulate also returns a Merkle root over
+				the heads it changed: JAM's commitment to the new head of A.</li>
 			</ul>`,
-		ref: 'PS §5.1 step 6, §5.5 (head commitment), §8.1 (pushing a root)',
+		ref: 'PS §5.1 step 6, §5.5 (head commitment), §8.1 (settlement ring)',
 	},
-	{
-		id: 's2-summary',
-		stage: stage2,
-		title: 'Block N is settled',
-		body: `
-			<ul>
-				<li>A's ring now holds T<sub>A1</sub> and T<sub>A2</sub>. Any block of B that
-				consumes m<sub>1</sub> and m<sub>2</sub> can name T<sub>A2</sub> and is sure to
-				pass check 5, as long as T<sub>A2</sub> stays in the 64-entry window.</li>
-				<li>That is the inclusion tier: B depends only on roots JAM has already
-				settled.</li>
-			</ul>
-			<p>Next: Stage 3, B's collator fetches m<sub>1</sub> and m<sub>2</sub>.</p>`,
-		ref: '',
-	},
-
-	// ── Stage 3 ──
 	{
 		id: 's3-notice',
-		stage: stage3,
+		stage: C3,
 		title: "B's collator sees T<sub>A2</sub> in A's ring",
 		body: `
 			<ul>
@@ -392,7 +399,7 @@ export const steps = [
 	},
 	{
 		id: 's3-fetch',
-		stage: stage3,
+		stage: C3,
 		title: 'Fetch by position, trust by root',
 		body: `
 			<ul>
@@ -407,7 +414,7 @@ export const steps = [
 	},
 	{
 		id: 's3-verify',
-		stage: stage3,
+		stage: C3,
 		title: 'B verifies before it trusts anything',
 		body: `
 			<ul>
@@ -421,16 +428,14 @@ export const steps = [
 			</ul>`,
 		ref: 'SM :936 (verification)',
 	},
-
-	// ── Stage 4 ──
 	{
 		id: 's4-inherent',
-		stage: stage4,
+		stage: C4,
 		title: "B's collator starts block M",
 		body: `
 			<ul>
-				<li>The verified payloads go into block M's messaging inherent, the same path
-				A used for the register in stage 0.</li>
+				<li>The verified payloads go into block M's messaging inherent, like the
+				register went into A's block in Part I.</li>
 				<li>The inherent carries payloads only, never a StreamsRoot. A root chosen by
 				the block author would prove nothing to the runtime.</li>
 			</ul>`,
@@ -438,7 +443,7 @@ export const steps = [
 	},
 	{
 		id: 's4-consume',
-		stage: stage4,
+		stage: C4,
 		title: 'B consumes #0–#2',
 		body: `
 			<ul>
@@ -448,29 +453,14 @@ export const steps = [
 				<li><code>OpenChannel</code> is consumed in order like any message; m<sub>1</sub>
 				and m<sub>2</sub> are handed to B's application.</li>
 				<li>The block writes a consumption record: for A's data stream, where consumption
-				started and where it ended.</li>
+				started and where it ended. It names no root. B sent nothing, so B's
+				StreamsRoot stays T<sub>B1</sub>.</li>
 			</ul>`,
 		ref: 'SM :676 (InboundFrontier), :1244 (consumption record)',
 	},
 	{
-		id: 's4-summary',
-		stage: stage4,
-		title: 'Block M consumed, but names no root',
-		body: `
-			<ul>
-				<li>Block M records what it consumed, not which root it trusted. It never sees
-				T<sub>A2</sub>.</li>
-				<li>Block M sent nothing, so B's StreamsRoot is still T<sub>B1</sub> and block M
-				publishes no root.</li>
-			</ul>
-			<p>Next: binding block M to T<sub>A2</sub> is the validation wrapper's job.</p>`,
-		ref: '',
-	},
-
-	// ── Stage 5 ──
-	{
 		id: 's5-package',
-		stage: stage5,
+		stage: C4,
 		title: 'Block M goes to JAM, with a lift',
 		body: `
 			<ul>
@@ -483,25 +473,25 @@ export const steps = [
 	},
 	{
 		id: 's5-refine',
-		stage: stage5,
+		stage: C4,
 		title: 'The wrapper turns consumption into a requirement',
 		body: `
 			<ul>
-				<li>After executing block M, the validate_block wrapper reads the consumption
-				record and stitches the intervals of all blocks in the candidate. One block,
-				one interval: the endpoint is frontier(3).</li>
+				<li>After executing block M, the <code>validate_block</code> wrapper reads the
+				consumption record and stitches the intervals of all blocks in the candidate.
+				One block, one interval: the endpoint is frontier(3).</li>
 				<li>The lift carries the endpoint to a committed root: extension (empty) to the
 				stream root, tree proof to A's StreamsRoot T<sub>A2</sub>.</li>
-				<li>Host fn 205 declares <code>[(A, T<sub>A2</sub>)]</code>. The service's Refine
-				only checks the shape (at most 32 sources, no duplicates, not itself); proving
-				the lift is the parachain's own code.</li>
+				<li>Host fn 205 declares <code>[(A, T<sub>A2</sub>)]</code>, the old UMP
+				<code>Requires</code>. The service's Refine only checks the shape (at most 32
+				sources, no duplicates, not itself); proving the lift is the parachain's own code.</li>
 			</ul>`,
 		ref: 'SM :1330 (build_requires); PS host fn 205 (:803)',
 	},
 	{
 		id: 's5-settle',
-		stage: stage5,
-		title: 'Check 5: is T<sub>A2</sub> in A\'s ring?',
+		stage: C5,
+		title: "Check 5: is T<sub>A2</sub> in A's ring?",
 		body: `
 			<ul>
 				<li>Accumulate looks up <code>(A, T<sub>A2</sub>)</code> in
@@ -515,97 +505,16 @@ export const steps = [
 		ref: 'PS §5.1 step 5, §8.1 (checking membership)',
 	},
 	{
-		id: 's5-summary',
-		stage: stage5,
-		title: 'm<sub>1</sub> and m<sub>2</sub> are delivered',
+		id: 'p2-summary',
+		stage: C5,
+		title: 'The whole picture',
 		body: `
 			<ul>
-				<li>B's block M is enacted, and it is enacted only because the root it depends
-				on is settled.</li>
-				<li>The service compared two 32-byte hashes. Every payload and proof stayed with
-				the two chains.</li>
-			</ul>
-			<p>Next: A still counts the three messages as in flight. Credit has to flow back.</p>`,
-		ref: '',
-	},
-
-	// ── Stage 6 ──
-	{
-		id: 's6-publish',
-		stage: stage6,
-		title: 'B republishes its register',
-		body: `
-			<ul>
-				<li>B publishes a new <code>Register</code> once consumption has advanced far
-				enough (e.g. a quarter of the window) or an age threshold passes.</li>
-				<li>Leaf #1 on B's ack stream: <code>up_to 3</code>, same grant. Only the latest
-				leaf matters; it supersedes #0.</li>
-				<li>Publishing is a send, so B's StreamsRoot becomes T<sub>B2</sub>, and B's
-				collator archives the leaf.</li>
-			</ul>`,
-		ref: 'SM :1942 (publishing), :1885 (Register)',
-	},
-	{
-		id: 's6-settle',
-		stage: stage6,
-		title: 'T<sub>B2</sub> settles in B\'s ring',
-		body: `
-			<p>Same pipeline as stage 2, for B's block M+1: work package, Refine with host
-			fn 204, Accumulate pushes T<sub>B2</sub> into B's ring.</p>`,
-		ref: 'PS §5.1 step 6',
-	},
-	{
-		id: 's6-read',
-		stage: stage6,
-		title: "A's collator reads the new register",
-		body: `
-			<ul>
-				<li>B's ring moved, so A's collator asks again:
-				<code>EventRequest{Ack{A,0,0}, at: None, under: T<sub>B2</sub>}</code>.</li>
-				<li><code>under</code> fixes the head: an old leaf cannot be served as the head
-				under T<sub>B2</sub>. The response verifies against T<sub>B2</sub>.</li>
-			</ul>`,
-		ref: 'SM :1952 (reading, sender side)',
-	},
-	{
-		id: 's6-import',
-		stage: stage6,
-		title: 'Credit is back',
-		body: `
-			<ul>
-				<li>A's next block imports the register. In flight counts positions ≥
-				<code>up_to</code>, and <code>up_to</code> is now 3: 0 of 16 messages in flight.</li>
-				<li>That block's init also absorbed m<sub>1</sub> and m<sub>2</sub> into the stored
-				frontier, as stage 1 said it would.</li>
-				<li>The read creates <code>requires (B, T<sub>B2</sub>)</code>: A's block settles
-				only while T<sub>B2</sub> is in B's ring.</li>
-			</ul>`,
-		ref: 'SM :1937 (window accounting)',
-	},
-	{
-		id: 's6-prune',
-		stage: stage6,
-		title: 'A may prune its archive',
-		body: `
-			<ul>
-				<li>A may drop payloads below the watermark once the register asserting it is
-				irreversible at the tier in use.</li>
-				<li>Read under a settled root, it is irreversible by definition. #0–#2 can go;
-				the stored frontier still lets A extend the stream.</li>
-			</ul>`,
-		ref: 'SM :2039 (archive pruning)',
-	},
-	{
-		id: 's6-summary',
-		stage: stage6,
-		title: 'The loop is closed',
-		body: `
-			<ul>
-				<li>A sent m<sub>1</sub> and m<sub>2</sub>; B consumed them; B's register gave the
-				credit back; A pruned what it no longer needs.</li>
-				<li>On JAM: two roots in each ring, and two membership checks. Everything else
-				was runtime and collator work.</li>
-				<li>Each direction depended only on roots already settled: the inclusion tier.</li>
+				<li>B's block M is enacted, and only because the root it depends on is settled.</li>
+				<li>The register travelled the other way through the same mechanisms: A read it
+				③ ④, and A's block had to pass check ⑤ against T<sub>B1</sub> in B's ring.</li>
+				<li>On JAM: a few 32-byte roots per ring and a membership check per dependency.
+				Every payload and proof stayed with the two chains.</li>
 			</ul>`,
 		ref: '',
 	},

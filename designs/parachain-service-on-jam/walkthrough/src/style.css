@@ -98,7 +98,6 @@ main {
 .trail { fill: none; stroke-width: 1.5; stroke-linecap: round; opacity: 0.6; }
 .trail.a { stroke: var(--a); }
 .trail.b { stroke: var(--b); }
-.halo { fill: none; stroke: var(--text); stroke-width: 2.5; }
 
 #scene .ok text { fill: var(--off); font-size: 12px; font-weight: 600; }
 
@@ -162,7 +161,6 @@ main {
 #scene .kicker { fill: var(--jam); font-size: 13px; font-weight: 700; letter-spacing: 0.14em; }
 #scene .hero { font-size: 40px; font-weight: 700; }
 #scene .big-sub { font-size: 16px; }
-#scene .goal-line { font-size: 18px; }
 .goal-node { fill: var(--surface); stroke-width: 2; }
 .goal-node.a { stroke: var(--a); }
 .goal-node.b { stroke: var(--b); }
@@ -170,12 +168,8 @@ main {
 #scene .goal-node-t.a { fill: var(--a); }
 #scene .goal-node-t.b { fill: var(--b); }
 .goal-arrow { fill: none; stroke: var(--a); stroke-width: 3; }
-.goal-arrow.rev { stroke: var(--dim); stroke-width: 1.5; stroke-dasharray: 6 6; }
 .goal-head { fill: var(--a); }
-#scene .goal-lbl { fill: var(--text); font-size: 13px; }
 .goal-msg { fill: var(--a); }
-#scene .road { fill: var(--dim); font-size: 15px; }
-#scene .road.done { fill: var(--text); }
 
 /* Stages 3–6 */
 .chain.b .leaf.acopy rect { fill: #1d3557; stroke: var(--a); }
@@ -184,6 +178,14 @@ main {
 #scene .fetch-ok { fill: var(--off); font-size: 11px; font-weight: 600; }
 .check-line { fill: none; stroke: var(--off); stroke-width: 2.5; }
 #scene .pill.green text.mono-pill { font-family: var(--mono); font-size: 11px; }
+
+/* ①–⑤ markers, rewind banners, legend */
+.marker circle { fill: #2a2140; stroke: var(--jam); stroke-width: 1.5; }
+#scene .marker text { fill: var(--jam); font-size: 12px; font-weight: 700; }
+#scene .marker.big text { font-size: 13px; }
+#scene .lg-title { font-size: 14px; font-weight: 650; }
+.banner rect { fill: #2a2140; stroke: var(--jam); stroke-width: 1.5; }
+#scene .banner text { fill: var(--text); font-size: 13px; font-weight: 600; }
 
 /* Off-chain band: always faint, brightened by an overlay in the fetch step */
 .band { fill: var(--off); fill-opacity: 0.025; stroke: var(--off); stroke-opacity: 0.35; stroke-width: 1.5; stroke-dasharray: 8 6; }
@@ -232,6 +234,10 @@ main {
 #step-body p { margin: 0 0 10px; }
 #step-body ul { margin: 0 0 10px; padding-left: 18px; }
 #step-body li { margin-bottom: 6px; }
+#step-body li.past { color: #98a1b3; }
+#step-body li.now { color: var(--text); }
+#step-body li.now::marker { color: var(--jam); }
+#step-body li.later { display: none; }
 #step-body .key {
 	padding: 10px 12px;
 	border-left: 3px solid var(--off);

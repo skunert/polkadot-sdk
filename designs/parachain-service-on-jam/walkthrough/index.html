@@ -11,37 +11,37 @@
 <svg id="scene" viewBox="0 0 1200 820" preserveAspectRatio="xMidYMid meet">
 	<!-- Motion paths. Invisible; tokens travel along them. -->
 	<g id="paths" fill="none" stroke="none">
-		<path id="pA1" d="M434,70 C434,220 290,250 290,395" />
-		<path id="pA2" d="M290,395 C290,500 580,480 580,560" />
-		<path id="pA3" d="M580,560 L580,660" />
-		<path id="pA4" d="M580,660 C420,560 100,530 80,612" />
-		<path id="pB1" d="M1054,70 C1054,220 910,250 910,395" />
-		<path id="pB2" d="M910,395 C910,500 580,480 580,560" />
-		<path id="pB3" d="M580,560 L580,660" />
-		<path id="pB4" d="M580,660 C740,560 860,530 880,612" />
-		<path id="pReq" d="M530,383 L670,383" />
-		<path id="pResp" d="M655,410 L545,410" />
-		<path id="pInh" d="M290,395 L290,335" />
-		<path id="pTx1" d="M1100,395 L910,395" />
-		<path id="pTx2" d="M910,395 L910,335" />
-		<path id="pA5" d="M580,660 C420,560 144,530 124,612" />
-		<path id="pB5" d="M580,660 C740,560 904,530 924,612" />
-		<path id="pMReq" d="M670,383 L530,383" />
-		<path id="pMResp" d="M545,410 L655,410" />
+		<path id="pA1" d="M434,70 C434,220 290,250 290,411" />
+		<path id="pA2" d="M290,411 C290,524 580,504 580,584" />
+		<path id="pA3" d="M580,584 L580,684" />
+		<path id="pA4" d="M580,684 C420,584 100,554 80,636" />
+		<path id="pB1" d="M1054,70 C1054,220 910,250 910,411" />
+		<path id="pB2" d="M910,411 C910,524 580,504 580,584" />
+		<path id="pB3" d="M580,584 L580,684" />
+		<path id="pB4" d="M580,684 C740,584 860,554 880,636" />
+		<path id="pReq" d="M530,399 L670,399" />
+		<path id="pResp" d="M655,426 L545,426" />
+		<path id="pInh" d="M290,411 L290,351" />
+		<path id="pTx1" d="M1100,411 L910,411" />
+		<path id="pTx2" d="M910,411 L910,351" />
+		<path id="pA5" d="M580,684 C420,584 144,554 124,636" />
+		<path id="pB5" d="M580,684 C740,584 904,554 924,636" />
+		<path id="pMReq" d="M670,399 L530,399" />
+		<path id="pMResp" d="M545,426 L655,426" />
 	</g>
 
 	<!-- ───────────── Parachain A ─────────────
 	     Same template in both boxes: header with StreamsRoot, then one
 	     "Channel A→B" section whose rows are the channel's two streams. -->
 	<g id="chainA" class="chain a">
-		<rect class="box" x="30" y="30" width="520" height="280" rx="14" />
+		<rect class="box" x="30" y="30" width="520" height="288" rx="14" />
 		<text class="title" x="50" y="64">Parachain A</text>
 		<text class="sub" x="186" y="64">sender</text>
-		<g id="a-block" class="pill amber" transform="translate(500,30)" style="opacity:0">
+		<g id="a-block" class="pill amber" transform="translate(300,30)" style="opacity:0">
 			<rect x="-31" y="-11" width="62" height="22" rx="11" />
 			<text y="4" text-anchor="middle">block N</text>
 		</g>
-		<g id="a-block-ok" class="pill green" transform="translate(500,30)" style="opacity:0">
+		<g id="a-block-ok" class="pill green" transform="translate(300,30)" style="opacity:0">
 			<rect x="-32" y="-11" width="64" height="22" rx="11" />
 			<text class="tight" y="4" text-anchor="middle">block N ✓</text>
 		</g>
@@ -103,27 +103,27 @@
 		<path id="a-fold" class="fold" d="M472,138 C500,138 500,90 470,64" />
 
 		<!-- ack row: A reads -->
-		<text class="row-label" x="50" y="203">reads</text>
-		<g class="chip ack"><rect x="92" y="189" width="44" height="20" rx="10" /><text x="114" y="203" text-anchor="middle">ack</text></g>
-		<text id="a-ack-none" class="mono dim" x="150" y="203">—</text>
+		<text class="row-label" x="50" y="213">reads</text>
+		<g class="chip ack"><rect x="92" y="199" width="44" height="20" rx="10" /><text x="114" y="213" text-anchor="middle">ack</text></g>
+		<text id="a-ack-none" class="mono dim" x="150" y="213">—</text>
 		<g id="a-ack-reg" style="opacity:0">
-			<text id="a-ack-reg-l1" class="mono" x="150" y="203">Register #0 ✓  up_to 0</text>
-			<text id="a-req-line" class="mono small dim" x="150" y="225">→ requires (B, T<tspan class="subs" dy="3">B1</tspan><tspan dy="-3">) via host fn 205</tspan></text>
+			<text id="a-ack-reg-l1" class="mono" x="150" y="213">Register #0 ✓  up_to 0</text>
+			<text id="a-req-line" class="mono small dim" x="150" y="235">→ requires (B, T<tspan class="subs" dy="3">B1</tspan><tspan dy="-3">) via host fn 205</tspan></text>
 		</g>
 
 		<!-- Stage 1: credit gauge and the block's send calls -->
 		<g id="a-credit" style="opacity:0">
-			<text class="mono small dim" x="150" y="228">in flight</text>
-			<rect class="credit-bg" x="222" y="221" width="120" height="8" rx="4" />
-			<rect id="a-credit-fill" class="credit-fill" x="222" y="221" width="7.5" height="8" rx="4" />
-			<text id="a-cr-1" class="mono small" x="352" y="228">1 / 16 msg</text>
-			<text id="a-cr-2" class="mono small" x="352" y="228" style="opacity:0">2 / 16 msg</text>
-			<text id="a-cr-3" class="mono small" x="352" y="228" style="opacity:0">3 / 16 msg</text>
-			<text id="a-cr-0" class="mono small" x="352" y="228" style="opacity:0">0 / 16 msg</text>
+			<text class="mono small dim" x="150" y="238">in flight</text>
+			<rect class="credit-bg" x="222" y="231" width="120" height="8" rx="4" />
+			<rect id="a-credit-fill" class="credit-fill" x="222" y="231" width="7.5" height="8" rx="4" />
+			<text id="a-cr-1" class="mono small" x="352" y="238">1 / 16 msg</text>
+			<text id="a-cr-2" class="mono small" x="352" y="238" style="opacity:0">2 / 16 msg</text>
+			<text id="a-cr-3" class="mono small" x="352" y="238" style="opacity:0">3 / 16 msg</text>
+			<text id="a-cr-0" class="mono small" x="352" y="238" style="opacity:0">0 / 16 msg</text>
 		</g>
 		<!-- Stage 6: B's second register, read under T_B2 -->
-		<text id="a-ack-reg2" class="mono" x="150" y="203" style="opacity:0">Register #1 ✓  up_to 3</text>
-		<text id="a-req2" class="mono small dim" x="150" y="252" style="opacity:0">→ requires (B, T<tspan class="subs" dy="3">B2</tspan><tspan dy="-3">) via host fn 205</tspan></text>
+		<text id="a-ack-reg2" class="mono" x="150" y="213" style="opacity:0">Register #1 ✓  up_to 3</text>
+		<text id="a-req2" class="mono small dim" x="150" y="262" style="opacity:0">→ requires (B, T<tspan class="subs" dy="3">B2</tspan><tspan dy="-3">) via host fn 205</tspan></text>
 		<g id="a-leaf1s" class="leaf" style="opacity:0">
 			<rect x="204" y="118" width="48" height="40" rx="6" />
 			<text class="msg-leaf" x="228" y="143" text-anchor="middle">m₁</text>
@@ -132,20 +132,20 @@
 			<rect x="258" y="118" width="48" height="40" rx="6" />
 			<text class="msg-leaf" x="282" y="143" text-anchor="middle">m₂</text>
 		</g>
-		<text id="send-log1" class="send-log" x="150" y="288" style="opacity:0">send(B, 0, 0, m₁) ✓</text>
-		<text id="send-log2" class="send-log" x="300" y="288" style="opacity:0">send(B, 0, 0, m₂) ✓</text>
+		<text id="send-log1" class="send-log" x="150" y="298" style="opacity:0">send(B, 0, 0, m₁) ✓</text>
+		<text id="send-log2" class="send-log" x="300" y="298" style="opacity:0">send(B, 0, 0, m₂) ✓</text>
 	</g>
 
 	<!-- ───────────── Parachain B ───────────── -->
 	<g id="chainB" class="chain b">
-		<rect class="box" x="650" y="30" width="520" height="280" rx="14" />
+		<rect class="box" x="650" y="30" width="520" height="288" rx="14" />
 		<text class="title" x="670" y="64">Parachain B</text>
 		<text class="sub" x="806" y="64">receiver</text>
-		<g id="b-block" class="pill amber" transform="translate(1120,30)" style="opacity:0">
+		<g id="b-block" class="pill amber" transform="translate(920,30)" style="opacity:0">
 			<rect x="-31" y="-11" width="62" height="22" rx="11" />
 			<text y="4" text-anchor="middle">block M</text>
 		</g>
-		<g id="b-block-ok" class="pill green" transform="translate(1120,30)" style="opacity:0">
+		<g id="b-block-ok" class="pill green" transform="translate(920,30)" style="opacity:0">
 			<rect x="-32" y="-11" width="64" height="22" rx="11" />
 			<text class="tight" y="4" text-anchor="middle">block M ✓</text>
 		</g>
@@ -183,26 +183,26 @@
 			<text id="b-front-0" class="split-label" x="770" y="174">InboundFrontier · leaf_count 0 (A's data stream)</text>
 
 			<!-- ack row: B writes -->
-			<text class="row-label" x="670" y="203">writes</text>
-			<g class="chip ack"><rect x="712" y="189" width="44" height="20" rx="10" /><text x="734" y="203" text-anchor="middle">ack</text></g>
+			<text class="row-label" x="670" y="213">writes</text>
+			<g class="chip ack"><rect x="712" y="199" width="44" height="20" rx="10" /><text x="734" y="213" text-anchor="middle">ack</text></g>
 			<g class="slots">
-				<rect x="770" y="180" width="48" height="40" rx="6" />
-				<rect x="824" y="180" width="48" height="40" rx="6" />
-				<rect x="878" y="180" width="48" height="40" rx="6" />
-				<rect x="932" y="180" width="48" height="40" rx="6" />
-				<rect x="986" y="180" width="48" height="40" rx="6" />
-				<rect x="1040" y="180" width="48" height="40" rx="6" />
+				<rect x="770" y="190" width="48" height="40" rx="6" />
+				<rect x="824" y="190" width="48" height="40" rx="6" />
+				<rect x="878" y="190" width="48" height="40" rx="6" />
+				<rect x="932" y="190" width="48" height="40" rx="6" />
+				<rect x="986" y="190" width="48" height="40" rx="6" />
+				<rect x="1040" y="190" width="48" height="40" rx="6" />
 			</g>
 		</g>
 		<g id="b-leaf0" class="leaf" style="opacity:0">
-			<rect x="770" y="180" width="48" height="40" rx="6" />
-			<text x="794" y="205" text-anchor="middle">Reg</text>
+			<rect x="770" y="190" width="48" height="40" rx="6" />
+			<text x="794" y="215" text-anchor="middle">Reg</text>
 		</g>
-		<text id="b-leaf0-detail" class="detail mono" x="770" y="242" style="opacity:0">#0 Register · up_to 0 · grant 16 msg / 64 KiB</text>
-		<text id="b-leaf1-detail" class="detail mono" x="770" y="242" style="opacity:0">#1 Register · up_to 3 · grant 16 msg / 64 KiB</text>
+		<text id="b-leaf0-detail" class="detail mono" x="770" y="254" style="opacity:0">#0 Register · up_to 0 · grant 16 msg / 64 KiB</text>
+		<text id="b-leaf1-detail" class="detail mono" x="770" y="254" style="opacity:0">#1 Register · up_to 3 · grant 16 msg / 64 KiB</text>
 		<g id="b-leaf1" class="leaf" style="opacity:0">
-			<rect x="824" y="180" width="48" height="40" rx="6" />
-			<text x="848" y="205" text-anchor="middle">Reg′</text>
+			<rect x="824" y="190" width="48" height="40" rx="6" />
+			<text x="848" y="215" text-anchor="middle">Reg′</text>
 		</g>
 		<!-- Stage 4: A's messages consumed into B's inbound frontier -->
 		<g id="b-in0" class="leaf acopy" style="opacity:0"><rect x="770" y="118" width="48" height="40" rx="6" /><text x="794" y="143" text-anchor="middle">OpenCh</text></g>
@@ -210,177 +210,183 @@
 		<g id="b-in2" class="leaf acopy" style="opacity:0"><rect x="878" y="118" width="48" height="40" rx="6" /><text class="msg-leaf" x="902" y="143" text-anchor="middle">m₂</text></g>
 		<text id="b-front-3" class="split-label" x="770" y="174" style="opacity:0">InboundFrontier · leaf_count 3 (A's data stream)</text>
 		<g id="b-record" style="opacity:0">
-			<text class="label" x="670" y="274">Consumption record · block M</text>
-			<text class="mono small" x="670" y="294">A · data stream: start root(∅) → end frontier(3)</text>
+			<text class="label" x="670" y="284">Consumption record · block M</text>
+			<text class="mono small" x="670" y="304">A · data stream: start root(∅) → end frontier(3)</text>
 		</g>
-		<path id="b-fold" class="fold" d="M1092,200 C1130,200 1130,90 1090,64" />
+		<path id="b-fold" class="fold" d="M1092,210 C1130,210 1130,90 1090,64" />
 	</g>
 
 	<!-- JAM frame, off-chain band, then route trails (cloned from the motion
 	     paths by main.js). All sit below collators and JAM nodes, so those
 	     boxes hide the parts of a trail that pass through them. -->
 	<g id="jam-frame" class="chain jam">
-		<rect class="box" x="30" y="480" width="1140" height="310" rx="14" />
+		<rect class="box" x="30" y="504" width="1140" height="296" rx="14" />
 	</g>
 	<g id="offchain-band">
-		<rect class="band" x="140" y="316" width="920" height="160" rx="12" />
-		<text class="band-label" x="1046" y="466" text-anchor="end">OFF-CHAIN</text>
+		<rect class="band" x="140" y="332" width="920" height="160" rx="12" />
+		<text class="band-label" x="1046" y="482" text-anchor="end">OFF-CHAIN</text>
 	</g>
-	<rect id="offchain-band-hi" class="band-hi" x="140" y="316" width="920" height="160" rx="12" style="opacity:0" />
+	<rect id="offchain-band-hi" class="band-hi" x="140" y="332" width="920" height="160" rx="12" style="opacity:0" />
 	<g id="trails"></g>
 
 	<!-- ───────────── Collators (off-chain) ───────────── -->
 	<g id="colA" class="node-g a">
-		<rect class="node" x="150" y="360" width="280" height="92" rx="10" />
-		<text class="title-s" x="290" y="388" text-anchor="middle">A collator</text>
+		<rect class="node" x="150" y="376" width="280" height="92" rx="10" />
+		<text class="title-s" x="290" y="404" text-anchor="middle">A collator</text>
 		<!-- node-local archive of A's sends, by position on the data stream -->
-		<text id="a-archive" class="archive-label" x="168" y="415" style="opacity:0">archive · data</text>
-		<g id="arc-a0" class="archive-chip" style="opacity:0"><rect x="246" y="402" width="40" height="18" rx="4" /><text x="266" y="415" text-anchor="middle">OpenCh</text></g>
-		<g id="arc-a1" class="archive-chip" style="opacity:0"><rect x="290" y="402" width="40" height="18" rx="4" /><text x="310" y="416" text-anchor="middle" class="msg">m₁</text></g>
-		<g id="arc-a2" class="archive-chip" style="opacity:0"><rect x="334" y="402" width="40" height="18" rx="4" /><text x="354" y="416" text-anchor="middle" class="msg">m₂</text></g>
-		<text id="arc-a-pruned" class="archive-note" x="246" y="415" style="opacity:0">pruned #0–#2 (below up_to 3)</text>
+		<text id="a-archive" class="archive-label" x="168" y="431" style="opacity:0">archive · data</text>
+		<g id="arc-a0" class="archive-chip" style="opacity:0"><rect x="246" y="418" width="40" height="18" rx="4" /><text x="266" y="431" text-anchor="middle">OpenCh</text></g>
+		<g id="arc-a1" class="archive-chip" style="opacity:0"><rect x="290" y="418" width="40" height="18" rx="4" /><text x="310" y="432" text-anchor="middle" class="msg">m₁</text></g>
+		<g id="arc-a2" class="archive-chip" style="opacity:0"><rect x="334" y="418" width="40" height="18" rx="4" /><text x="354" y="432" text-anchor="middle" class="msg">m₂</text></g>
+		<text id="arc-a-pruned" class="archive-note" x="246" y="431" style="opacity:0">pruned #0–#2 (below up_to 3)</text>
 		<!-- peer data this collator fetched and verified, staged for its next inherent -->
-		<text id="a-fetched" class="archive-label" x="168" y="439" style="opacity:0">fetched · ack</text>
-		<g id="fet-a0" class="archive-chip b" style="opacity:0"><rect x="246" y="426" width="40" height="18" rx="4" /><text x="266" y="439" text-anchor="middle">Reg</text></g>
-		<text id="fet-a0-ok" class="fetch-ok" x="292" y="439" style="opacity:0">✓ T<tspan class="subs" dy="3">B1</tspan></text>
-		<g id="fet-a1" class="archive-chip b" style="opacity:0"><rect x="246" y="426" width="40" height="18" rx="4" /><text x="266" y="439" text-anchor="middle">Reg′</text></g>
-		<text id="fet-a1-ok" class="fetch-ok" x="292" y="439" style="opacity:0">✓ T<tspan class="subs" dy="3">B2</tspan></text>
+		<text id="a-fetched" class="archive-label" x="168" y="455" style="opacity:0">fetched · ack</text>
+		<g id="fet-a0" class="archive-chip b" style="opacity:0"><rect x="246" y="442" width="40" height="18" rx="4" /><text x="266" y="455" text-anchor="middle">Reg</text></g>
+		<text id="fet-a0-ok" class="fetch-ok" x="292" y="455" style="opacity:0">✓ T<tspan class="subs" dy="3">B1</tspan></text>
+		<g id="fet-a1" class="archive-chip b" style="opacity:0"><rect x="246" y="442" width="40" height="18" rx="4" /><text x="266" y="455" text-anchor="middle">Reg′</text></g>
+		<text id="fet-a1-ok" class="fetch-ok" x="292" y="455" style="opacity:0">✓ T<tspan class="subs" dy="3">B2</tspan></text>
 	</g>
 	<g id="colB" class="node-g b">
-		<rect class="node" x="770" y="360" width="280" height="92" rx="10" />
-		<text class="title-s" x="910" y="388" text-anchor="middle">B collator</text>
-		<text id="b-archive" class="archive-label" x="788" y="415" style="opacity:0">archive · ack</text>
-		<g id="arc-b0" class="archive-chip b" style="opacity:0"><rect x="866" y="402" width="40" height="18" rx="4" /><text x="886" y="415" text-anchor="middle">Reg</text></g>
-		<g id="arc-b1" class="archive-chip b" style="opacity:0"><rect x="910" y="402" width="40" height="18" rx="4" /><text x="930" y="415" text-anchor="middle">Reg′</text></g>
-		<text id="b-fetched" class="archive-label" x="788" y="439" style="opacity:0">fetched · data</text>
-		<g id="fet-b0" class="archive-chip" style="opacity:0"><rect x="866" y="426" width="40" height="18" rx="4" /><text x="886" y="439" text-anchor="middle">OpenCh</text></g>
-		<g id="fet-b1" class="archive-chip" style="opacity:0"><rect x="910" y="426" width="40" height="18" rx="4" /><text x="930" y="440" text-anchor="middle" class="msg">m₁</text></g>
-		<g id="fet-b2" class="archive-chip" style="opacity:0"><rect x="954" y="426" width="40" height="18" rx="4" /><text x="974" y="440" text-anchor="middle" class="msg">m₂</text></g>
-		<text id="fet-b-ok" class="fetch-ok" x="1000" y="439" style="opacity:0">✓ T<tspan class="subs" dy="3">A2</tspan></text>
+		<rect class="node" x="770" y="376" width="280" height="92" rx="10" />
+		<text class="title-s" x="910" y="404" text-anchor="middle">B collator</text>
+		<text id="b-archive" class="archive-label" x="788" y="431" style="opacity:0">archive · ack</text>
+		<g id="arc-b0" class="archive-chip b" style="opacity:0"><rect x="866" y="418" width="40" height="18" rx="4" /><text x="886" y="431" text-anchor="middle">Reg</text></g>
+		<g id="arc-b1" class="archive-chip b" style="opacity:0"><rect x="910" y="418" width="40" height="18" rx="4" /><text x="930" y="431" text-anchor="middle">Reg′</text></g>
+		<text id="b-fetched" class="archive-label" x="788" y="455" style="opacity:0">fetched · data</text>
+		<g id="fet-b0" class="archive-chip" style="opacity:0"><rect x="866" y="442" width="40" height="18" rx="4" /><text x="886" y="455" text-anchor="middle">OpenCh</text></g>
+		<g id="fet-b1" class="archive-chip" style="opacity:0"><rect x="910" y="442" width="40" height="18" rx="4" /><text x="930" y="456" text-anchor="middle" class="msg">m₁</text></g>
+		<g id="fet-b2" class="archive-chip" style="opacity:0"><rect x="954" y="442" width="40" height="18" rx="4" /><text x="974" y="456" text-anchor="middle" class="msg">m₂</text></g>
+		<text id="fet-b-ok" class="fetch-ok" x="1000" y="455" style="opacity:0">✓ T<tspan class="subs" dy="3">A2</tspan></text>
 	</g>
 	<!-- Whoever signs accept_open_channel on B's side -->
 	<g id="user" class="actor" style="opacity:0">
-		<circle cx="1115" cy="383" r="8" />
-		<path d="M1101,407 a14,12 0 0 1 28,0 z" />
-		<text x="1115" y="424" text-anchor="middle">user</text>
+		<circle cx="1115" cy="399" r="8" />
+		<path d="M1101,423 a14,12 0 0 1 28,0 z" />
+		<text x="1115" y="440" text-anchor="middle">user</text>
 	</g>
 
 	<!-- ───────────── JAM chain ───────────── -->
 	<g id="jam" class="chain jam">
-		<text class="title" x="50" y="514">JAM chain</text>
-		<text class="sub" x="160" y="514">Parachain Service · stores 32-byte roots only</text>
+		<text class="title" x="50" y="538">JAM chain</text>
+		<text class="sub" x="160" y="538">Parachain Service · stores 32-byte roots only</text>
 
 		<g id="refine" class="node-g">
-			<rect class="node" x="480" y="530" width="200" height="60" rx="10" />
-			<text class="title-s" x="580" y="556" text-anchor="middle">Refine</text>
-			<text class="sub" x="580" y="576" text-anchor="middle">host fn 204 → streams_root</text>
+			<rect class="node" x="480" y="554" width="200" height="60" rx="10" />
+			<text class="title-s" x="580" y="580" text-anchor="middle">Refine</text>
+			<text class="sub" x="580" y="600" text-anchor="middle">host fn 204 → streams_root</text>
 		</g>
-		<line class="flow" x1="580" y1="590" x2="580" y2="630" />
-		<text class="hint" x="572" y="614" text-anchor="end">work digest</text>
+		<line class="flow" x1="580" y1="614" x2="580" y2="654" />
+		<text class="hint" x="572" y="638" text-anchor="end">work digest</text>
 		<g id="accumulate" class="node-g">
-			<rect class="node" x="480" y="630" width="200" height="60" rx="10" />
-			<text class="title-s" x="580" y="656" text-anchor="middle">Accumulate</text>
-			<text class="sub" x="580" y="676" text-anchor="middle">settle · push into ring</text>
+			<rect class="node" x="480" y="654" width="200" height="60" rx="10" />
+			<text class="title-s" x="580" y="680" text-anchor="middle">Accumulate</text>
+			<text class="sub" x="580" y="700" text-anchor="middle">settle · push into ring</text>
 		</g>
 
 		<!-- Stage 2: what sits at Refine / Accumulate for block N -->
-		<g id="refine-wp" class="pill amber" transform="translate(760,560)" style="opacity:0">
+		<g id="refine-wp" class="pill amber" transform="translate(760,584)" style="opacity:0">
 			<rect x="-58" y="-11" width="116" height="22" rx="11" />
 			<text y="4" text-anchor="middle">WP · block N</text>
 		</g>
 		<g id="join-badges" class="ok" style="opacity:0">
-			<text x="592" y="606">✓ guaranteed</text>
-			<text x="592" y="623">✓ available</text>
+			<text x="592" y="630">✓ guaranteed</text>
+			<text x="592" y="647">✓ available</text>
 		</g>
-		<g id="acc-digest" class="pill blue" transform="translate(760,660)" style="opacity:0">
+		<g id="acc-digest" class="pill blue" transform="translate(760,684)" style="opacity:0">
 			<rect x="-58" y="-11" width="116" height="22" rx="11" />
 			<text class="mono" y="4" text-anchor="middle">digest · T<tspan class="subs" dy="3">A2</tspan></text>
 		</g>
 
-		<g id="refine-wpB" class="pill amber" transform="translate(760,560)" style="opacity:0">
+		<g id="refine-wpB" class="pill amber" transform="translate(760,584)" style="opacity:0">
 			<rect x="-58" y="-11" width="116" height="22" rx="11" />
 			<text y="4" text-anchor="middle">WP · block M</text>
 		</g>
-		<g id="acc-digestB" class="pill blue" transform="translate(580,714)" style="opacity:0">
+		<g id="acc-digestB" class="pill blue" transform="translate(580,738)" style="opacity:0">
 			<rect x="-100" y="-11" width="200" height="22" rx="11" />
 			<text class="mono" y="4" text-anchor="middle">digest · requires (A, T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>)</text>
 		</g>
 
 		<!-- settlement ring A; the caret marks the next free slot -->
 		<g class="slots">
-			<rect x="60" y="592" width="40" height="40" rx="6" />
-			<rect x="104" y="592" width="40" height="40" rx="6" />
-			<rect x="148" y="592" width="40" height="40" rx="6" />
-			<rect x="192" y="592" width="40" height="40" rx="6" />
-			<rect x="236" y="592" width="40" height="40" rx="6" />
-			<rect x="280" y="592" width="40" height="40" rx="6" />
+			<rect x="60" y="616" width="40" height="40" rx="6" />
+			<rect x="104" y="616" width="40" height="40" rx="6" />
+			<rect x="148" y="616" width="40" height="40" rx="6" />
+			<rect x="192" y="616" width="40" height="40" rx="6" />
+			<rect x="236" y="616" width="40" height="40" rx="6" />
+			<rect x="280" y="616" width="40" height="40" rx="6" />
 		</g>
-		<text class="hint" x="326" y="617">…64</text>
+		<text class="hint" x="326" y="641">…64</text>
 		<g id="a-ring0" class="ring-entry a" style="opacity:0">
-			<rect x="60" y="592" width="40" height="40" rx="6" />
-			<text class="mono" x="80" y="616" text-anchor="middle">T<tspan class="subs" dy="3">A1</tspan></text>
+			<rect x="60" y="616" width="40" height="40" rx="6" />
+			<text class="mono" x="80" y="640" text-anchor="middle">T<tspan class="subs" dy="3">A1</tspan></text>
 		</g>
 		<g id="a-ring1" class="ring-entry a" style="opacity:0">
-			<rect x="104" y="592" width="40" height="40" rx="6" />
-			<text class="mono" x="124" y="616" text-anchor="middle">T<tspan class="subs" dy="3">A2</tspan></text>
+			<rect x="104" y="616" width="40" height="40" rx="6" />
+			<text class="mono" x="124" y="640" text-anchor="middle">T<tspan class="subs" dy="3">A2</tspan></text>
 		</g>
 		<g id="a-tail" class="caret tail" style="opacity:0">
-			<path d="M80,640 l-6,10 h12 z" />
-			<text x="86" y="663" text-anchor="end">tail</text>
+			<path d="M80,664 l-6,10 h12 z" />
+			<text x="86" y="687" text-anchor="end">tail</text>
 		</g>
 		<g id="a-head" class="caret">
-			<path d="M80,640 l-6,10 h12 z" />
-			<text x="74" y="663">head · next write</text>
+			<path d="M80,664 l-6,10 h12 z" />
+			<text x="74" y="687">head · next write</text>
 		</g>
-		<text class="label" x="60" y="688">settlement ring · A</text>
+		<text class="label" x="60" y="712">settlement ring · A</text>
 
 		<!-- settlement ring B -->
 		<g class="slots">
-			<rect x="860" y="592" width="40" height="40" rx="6" />
-			<rect x="904" y="592" width="40" height="40" rx="6" />
-			<rect x="948" y="592" width="40" height="40" rx="6" />
-			<rect x="992" y="592" width="40" height="40" rx="6" />
-			<rect x="1036" y="592" width="40" height="40" rx="6" />
-			<rect x="1080" y="592" width="40" height="40" rx="6" />
+			<rect x="860" y="616" width="40" height="40" rx="6" />
+			<rect x="904" y="616" width="40" height="40" rx="6" />
+			<rect x="948" y="616" width="40" height="40" rx="6" />
+			<rect x="992" y="616" width="40" height="40" rx="6" />
+			<rect x="1036" y="616" width="40" height="40" rx="6" />
+			<rect x="1080" y="616" width="40" height="40" rx="6" />
 		</g>
-		<text class="hint" x="1126" y="617">…64</text>
+		<text class="hint" x="1126" y="641">…64</text>
 		<g id="b-ring0" class="ring-entry b" style="opacity:0">
-			<rect x="860" y="592" width="40" height="40" rx="6" />
-			<text class="mono" x="880" y="616" text-anchor="middle">T<tspan class="subs" dy="3">B1</tspan></text>
+			<rect x="860" y="616" width="40" height="40" rx="6" />
+			<text class="mono" x="880" y="640" text-anchor="middle">T<tspan class="subs" dy="3">B1</tspan></text>
 		</g>
 		<g id="b-ring1" class="ring-entry b" style="opacity:0">
-			<rect x="904" y="592" width="40" height="40" rx="6" />
-			<text class="mono" x="924" y="616" text-anchor="middle">T<tspan class="subs" dy="3">B2</tspan></text>
+			<rect x="904" y="616" width="40" height="40" rx="6" />
+			<text class="mono" x="924" y="640" text-anchor="middle">T<tspan class="subs" dy="3">B2</tspan></text>
 		</g>
 		<g id="b-tail" class="caret tail" style="opacity:0">
-			<path d="M880,640 l-6,10 h12 z" />
-			<text x="886" y="663" text-anchor="end">tail</text>
+			<path d="M880,664 l-6,10 h12 z" />
+			<text x="886" y="687" text-anchor="end">tail</text>
 		</g>
 		<g id="b-head" class="caret">
-			<path d="M880,640 l-6,10 h12 z" />
-			<text x="874" y="663">head · next write</text>
+			<path d="M880,664 l-6,10 h12 z" />
+			<text x="874" y="687">head · next write</text>
 		</g>
-		<text class="label" x="860" y="688">settlement ring · B</text>
+		<text class="label" x="860" y="712">settlement ring · B</text>
 
-		<text id="a-32" class="size-badge" x="84" y="586" style="opacity:0">32 B</text>
-		<text id="b-32" class="size-badge" x="884" y="586" style="opacity:0">32 B</text>
+		<text id="a-32" class="size-badge" x="84" y="610" style="opacity:0">32 B</text>
+		<text id="b-32" class="size-badge" x="884" y="610" style="opacity:0">32 B</text>
 	</g>
 
-	<!-- Highlights for the summary step -->
-	<rect id="halo-a" class="halo" x="52" y="584" width="56" height="56" rx="10" style="opacity:0" />
-	<rect id="halo-b" class="halo" x="852" y="584" width="56" height="56" rx="10" style="opacity:0" />
-
 	<!-- A's collator reading B's newest root from B's ring -->
-	<path id="read-line" class="read-line" d="M880,590 C880,500 640,470 432,425" />
-	<path id="read-line2" class="read-line" d="M124,590 C124,565 430,575 452,510 C468,465 690,455 768,445" />
-	<path id="read-line3" class="read-line" d="M924,590 C924,500 640,475 432,440" />
+	<path id="read-line" class="read-line" d="M880,614 C880,524 640,486 432,441" />
+	<path id="read-line2" class="read-line" d="M124,614 C124,589 430,599 452,534 C468,481 690,471 768,461" />
+	<path id="read-line3" class="read-line" d="M924,614 C924,524 640,491 432,456" />
 
-	<!-- Stage 5: Accumulate's settlement check reaches into A's ring -->
-	<path id="check-line" class="check-line" d="M480,640 C400,580 150,540 124,598" />
-	<g id="check-lbl" class="pill green" transform="translate(330,548)" style="opacity:0">
+	<!-- Accumulate's settlement check for block M reaches into A's ring -->
+	<path id="check-line" class="check-line" d="M480,664 C400,604 150,564 124,622" />
+	<g id="check-lbl" class="pill green" transform="translate(330,572)" style="opacity:0">
 		<rect x="-104" y="-11" width="208" height="22" rx="11" />
 		<text class="mono-pill" y="4" text-anchor="middle">(A, T<tspan class="subs" dy="3">A2</tspan><tspan dy="-3"></tspan>) is in A's ring ✓</text>
 	</g>
+
+	<!-- ①–⑤: where Part I compresses a mechanism that Part II opens up -->
+	<g id="mk1" class="marker" transform="translate(515,57)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">1</text></g>
+	<g id="mk2" class="marker" transform="translate(455,634)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">2</text></g>
+	<g id="mk3" class="marker" transform="translate(600,361)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">3</text></g>
+	<g id="mk4" class="marker" transform="translate(1140,300)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">4</text></g>
+	<g id="mk5" class="marker" transform="translate(455,696)" style="opacity:0"><circle r="11" /><text y="4" text-anchor="middle">5</text></g>
+
+	<!-- Banners for the scene rewinds between the parts -->
+	<g id="rw1" class="banner" style="opacity:0"><rect x="300" y="762" width="600" height="30" rx="15" /><text x="600" y="782" text-anchor="middle">◀◀ Back to: channel open, block N not yet authored</text></g>
 
 	<!-- ───────────── Stream id explainer (modal card) ───────────── -->
 	<g id="anatomy" style="opacity:0">
@@ -562,44 +568,37 @@
 		<text id="rf2-foot" class="hint" x="200" y="580" style="opacity:0">the lift is public data: anyone can rebuild it from A's streams and roots, so any collator can complete the candidate</text>
 	</g>
 
+	<!-- ───────────── Part I closing card: the five mechanisms ───────────── -->
+	<g id="legend" style="opacity:0">
+		<rect class="backdrop" x="0" y="0" width="1200" height="820" />
+		<rect class="card" x="170" y="240" width="860" height="350" rx="16" />
+		<text class="title" x="200" y="280">Five mechanisms behind the arrows</text>
+		<text class="sub" x="200" y="302">Part I showed each of them compressed. Part II opens them one by one.</text>
+		<g id="lg-r0" style="opacity:0"><g class="marker big" transform="translate(215,338)"><circle r="12" /><text y="4" text-anchor="middle">1</text></g><text class="lg-title" x="240" y="343">Commit</text><text x="430" y="343">a block folds every stream it touched into one StreamsRoot</text></g>
+		<g id="lg-r1" style="opacity:0"><g class="marker big" transform="translate(215,380)"><circle r="12" /><text y="4" text-anchor="middle">2</text></g><text class="lg-title" x="240" y="385">Settle</text><text x="430" y="385">work package → Refine → Accumulate: the root lands in the sender's ring</text></g>
+		<g id="lg-r2" style="opacity:0"><g class="marker big" transform="translate(215,422)"><circle r="12" /><text y="4" text-anchor="middle">3</text></g><text class="lg-title" x="240" y="427">Fetch &amp; verify</text><text x="430" y="427">collators exchange payloads and proofs, checked against a settled root</text></g>
+		<g id="lg-r3" style="opacity:0"><g class="marker big" transform="translate(215,464)"><circle r="12" /><text y="4" text-anchor="middle">4</text></g><text class="lg-title" x="240" y="469">Consume &amp; lift</text><text x="430" y="469">the receiving block records what it consumed; validation lifts that to a root</text></g>
+		<g id="lg-r4" style="opacity:0"><g class="marker big" transform="translate(215,506)"><circle r="12" /><text y="4" text-anchor="middle">5</text></g><text class="lg-title" x="240" y="511">Settlement check</text><text x="430" y="511">Accumulate enacts the block only if that root is in the sender's ring</text></g>
+	</g>
+
 	<!-- ───────────── Goal card (very first step) ───────────── -->
 	<g id="goal" style="opacity:0">
 		<rect class="backdrop solid" x="0" y="0" width="1200" height="820" />
-		<text id="goal-kicker" class="kicker" x="600" y="150" text-anchor="middle">SPECULATIVE MESSAGING · PARACHAIN SERVICE ON JAM</text>
-		<text id="goal-title" class="hero" x="600" y="210" text-anchor="middle">Sending messages between parachains</text>
-		<text id="goal-sub" class="sub big-sub" x="600" y="245" text-anchor="middle">an end-to-end walkthrough of the inclusion tier</text>
-
-		<g id="goal-text">
-			<text class="goal-line" x="600" y="300" text-anchor="middle">Goal: parachain A sends messages to parachain B.</text>
-			<text class="goal-line" x="600" y="326" text-anchor="middle">They open a unidirectional channel A→B: A writes, B reads.</text>
+		<g id="goal-head">
+			<text class="kicker" x="600" y="260" text-anchor="middle">SPECULATIVE MESSAGING · PARACHAIN SERVICE ON JAM</text>
+			<text class="hero" x="600" y="322" text-anchor="middle">Sending messages between parachains</text>
+			<text class="sub big-sub" x="600" y="360" text-anchor="middle">an end-to-end walkthrough</text>
 		</g>
-
 		<g id="goal-diagram">
-			<rect class="goal-node a" x="330" y="370" width="140" height="70" rx="12" />
-			<text class="goal-node-t a" x="400" y="412" text-anchor="middle">Parachain A</text>
-			<rect class="goal-node b" x="730" y="370" width="140" height="70" rx="12" />
-			<text class="goal-node-t b" x="800" y="412" text-anchor="middle">Parachain B</text>
-			<path id="goal-arrow" class="goal-arrow" d="M476,396 L722,396" />
-			<path class="goal-head" d="M722,396 l-12,-7 v14 z" />
-			<text class="goal-lbl" x="600" y="384" text-anchor="middle">Channel A→B · messages</text>
-			<g id="goal-rev" style="opacity:0">
-				<path class="goal-arrow rev" d="M800,446 C800,486 400,486 400,446" />
-				<text class="hint" x="600" y="506" text-anchor="middle">replies would need a second, separate channel B→A</text>
-			</g>
+			<rect class="goal-node a" x="330" y="430" width="140" height="70" rx="12" />
+			<text class="goal-node-t a" x="400" y="472" text-anchor="middle">Parachain A</text>
+			<rect class="goal-node b" x="730" y="430" width="140" height="70" rx="12" />
+			<text class="goal-node-t b" x="800" y="472" text-anchor="middle">Parachain B</text>
+			<path id="goal-arrow" class="goal-arrow" d="M476,465 L722,465" />
+			<path class="goal-head" d="M722,465 l-12,-7 v14 z" />
 			<circle id="goal-msg" class="goal-msg" r="7" cx="0" cy="0" style="opacity:0" />
 		</g>
-
-		<g id="goal-road">
-			<text class="label" x="600" y="540" text-anchor="middle">THE STAGES</text>
-			<text class="road done" x="300" y="572">0 · Open the channel</text>
-			<text class="road done" x="300" y="599">1 · A authors a block</text>
-			<text class="road done" x="300" y="626">2 · Block N through JAM</text>
-			<text class="road done" x="640" y="572">3 · B fetches the messages</text>
-			<text class="road done" x="640" y="599">4 · B consumes them</text>
-			<text class="road done" x="640" y="626">5 · B's block settles</text>
-			<text class="road done" x="640" y="653">6 · Credit flows back to A</text>
-			<text class="hint" x="600" y="700" text-anchor="middle">→ / Space to step through · ← back · R replay</text>
-		</g>
+		<text id="goal-hint" class="hint" x="600" y="600" text-anchor="middle">press → to begin</text>
 	</g>
 
 	<!-- ───────────── Travelling tokens ───────────── -->
