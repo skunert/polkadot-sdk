@@ -332,7 +332,7 @@ const build = {
 
 	's2-accumulate'(tl) {
 		tl.fromTo('#ac-card', { opacity: 0 }, { opacity: 1, duration: 0.4 })
-		for (let i = 0; i <= 7; i++) {
+		for (let i = 1; i <= 7; i++) {
 			tl.fromTo(`#ac-r${i}`, { opacity: 0 }, { opacity: 1, duration: 0.3 }, '+=0.2')
 		}
 		pulse(tl, '#ac-r5', undefined, 1.03)
@@ -548,7 +548,6 @@ function render() {
 			li.classList.toggle('later', j > beatIdx && beatIdx < n - 1)
 		})
 	}
-	$('step-ref').innerHTML = s.ref ? `Spec: ${s.ref}` : ''
 	dots.forEach((d, i) => {
 		d.classList.toggle('done', i < cur)
 		d.classList.toggle('current', i === cur)
